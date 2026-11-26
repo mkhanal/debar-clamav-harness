@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["schema", "harness", "stand-in"]
+members = ["schema", "harness", "stand-in", "builder"]
 
 [workspace.package]
 edition = "2024"

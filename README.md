@@ -10,9 +10,11 @@ The comparison harness for [Debar](https://github.com/mkhanal/debar) and the Cla
 | `observer-image` | The observer image the harness runs, pinned by digest |
 | `schema/` | The report schema (`report.schema.json`) and the `harness-report` crate that reads and writes it |
 | `harness/` | The `harness` command: `compare` two reports, or `run` both scanners over inputs and compare |
+| `builder/` | The input builder: turns each pattern signature into a file it must match, and proves those files against the reference scanner |
 | `stand-in/` | `debar-stand-in`, which writes a valid report of the top-level object alone, to prove the Debar side until Debar can scan |
 | `known-differences.jsonl` | The ratchet: every difference already known |
 | `fixtures/build` | Builds the small fixture files CI compares: the EICAR test file, a zip holding it beside a clean file, a clean text file and a file too small to scan |
+| `builder/prove-against-reference.sh` | Proves built inputs against the reference scanner |
 | `.github/workflows/compare.yml` | The reusable workflow Debar's CI calls |
 
 ## Running it locally
@@ -126,6 +128,32 @@ The order in which either side reached its children never matters, only their co
 The list only shrinks as Debar's pieces land. A line is added only when a person accepts the difference, in a commit that says why.
 
 Today the list holds what the stand-in cannot do: it types nothing, extracts nothing and detects nothing.
+
+## The input builder
+
+`builder/` (crate `clamav-input-builder`, command `builder`) turns pattern signatures into inputs that must match them, so every signature Debar is meant to detect can be checked with a file built from the signature itself. It is proved against the reference scanner before it judges Debar: an input the reference does not detect is a failure of the builder.
+
+```text
+builder survey --database-dir DIR [--details FILE]     account for every signature: built, or why not
+builder build --database FILE --signature NAME --out FILE
+builder sample --database-dir DIR --out-dir DIR [--extended N] [--logical N] [--seed N]
+builder check --manifest FILE --scan-output FILE [--failures FILE]
+```
+
+Of the 3,641,493 signatures in the pinned `main` and `daily` databases, **42,530 are built**. The rest are not built, each for a named reason the survey counts:
+
+| Not built because | Signatures |
+| --- | --- |
+| A hash signature, checked by lookup instead | 3,212,887 |
+| Needs a PE container around it | 369,986 |
+| Needs another container (OLE2, ELF, Mach-O, PDF, Flash, graphics, Java, archive metadata) | 13,078 |
+| Needs a `Container:` or `Intermediates:` condition | 2,177 |
+| Needs a regular-expression, byte-comparison or image fuzzy hash subsignature | 348 |
+| Other reasons: normalised content, functionality level, ignore lists, conflicting offsets, unreadable | 487 |
+
+`builder/prove-against-reference.sh WORK_DIRECTORY` unpacks `main` and `daily` from the pinned ClamAV image with `sigtool`, builds a sample of inputs in the toolchain image, scans them with that image's `clamscan --allmatch --no-summary --disable-cache`, and fails on any input not detected by the signature it was built for. `EXTENDED_SAMPLE`, `LOGICAL_SAMPLE` and `SAMPLE_SEED` set the sample; the sample is drawn by a small seeded shuffle of the builder's own, so the same seed draws the same signatures whatever crate versions change. The `Builder proof` workflow proves the seed-1 sample (2,500 inputs) on every change and every buildable signature weekly.
+
+The proof reads `clamscan`'s output rather than the observer's reports: it needs only which signatures matched each file, from the same library and databases, and scans with the clean cache off so that identical inputs cannot hide one another.
 
 ## Using it from Debar's CI
 

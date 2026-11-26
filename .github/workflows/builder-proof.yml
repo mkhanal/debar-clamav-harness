@@ -1,0 +1,34 @@
+name: Builder proof
+
+on:
+  push:
+  pull_request:
+  schedule:
+    - cron: "17 3 * * 1"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: true
+
+jobs:
+  prove:
+    name: prove built inputs against the reference (${{ github.event_name == 'schedule' && 'every buildable signature' || 'seed-1 sample' }})
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build inputs and scan them with the reference scanner
+        run: builder/prove-against-reference.sh "$RUNNER_TEMP/proof"
+        env:
+          EXTENDED_SAMPLE: ${{ github.event_name == 'schedule' && '1000000' || '2000' }}
+          LOGICAL_SAMPLE: ${{ github.event_name == 'schedule' && '1000000' || '500' }}
+          SAMPLE_SEED: "1"
+      - name: Show the inputs the reference did not detect
+        if: failure()
+        run: cat "$RUNNER_TEMP/proof/failures.tsv" || true
