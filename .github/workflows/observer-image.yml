@@ -1,0 +1,86 @@
+name: Observer image
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - observer/**
+      - .github/workflows/observer-image.yml
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  IMAGE: ghcr.io/${{ github.repository_owner }}/debar-clamav-observer
+
+jobs:
+  build:
+    name: build (${{ matrix.architecture }})
+    strategy:
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            architecture: amd64
+          - runner: ubuntu-24.04-arm
+            architecture: arm64
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      packages: write # pushes this architecture's image to ghcr.io
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build linux/${{ matrix.architecture }}
+        run: docker build --tag "$IMAGE:$GITHUB_SHA-$ARCHITECTURE" observer
+        env:
+          ARCHITECTURE: ${{ matrix.architecture }}
+      - name: Observe the EICAR test file
+        run: |
+          mkdir -p "$RUNNER_TEMP/input" "$RUNNER_TEMP/reports"
+          chmod 777 "$RUNNER_TEMP/reports"
+          printf '%s' 'X5O!P%@AP[4\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*' > "$RUNNER_TEMP/input/eicar.com"
+          docker run --rm --network none \
+            --volume "$RUNNER_TEMP/input:/input:ro" \
+            --volume "$RUNNER_TEMP/reports:/reports" \
+            "$IMAGE:$GITHUB_SHA-$ARCHITECTURE" /input/eicar.com /reports/eicar.jsonl
+          cat "$RUNNER_TEMP/reports/eicar.jsonl"
+          grep --quiet '"detections":\[[^]]*"Eicar-Signature"' "$RUNNER_TEMP/reports/eicar.jsonl"
+        env:
+          ARCHITECTURE: ${{ matrix.architecture }}
+      - name: Log in to the GitHub container registry
+        run: echo "$REGISTRY_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+        env:
+          REGISTRY_TOKEN: ${{ github.token }}
+      - name: Push linux/${{ matrix.architecture }}
+        run: docker push "$IMAGE:$GITHUB_SHA-$ARCHITECTURE"
+        env:
+          ARCHITECTURE: ${{ matrix.architecture }}
+
+  publish:
+    name: publish the multi-architecture image
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      packages: write # pushes the multi-architecture index to ghcr.io
+    steps:
+      - name: Log in to the GitHub container registry
+        run: echo "$REGISTRY_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+        env:
+          REGISTRY_TOKEN: ${{ github.token }}
+      - name: Join both architectures under one digest
+        run: |
+          docker buildx imagetools create \
+            --tag "$IMAGE:$GITHUB_SHA" \
+            "$IMAGE:$GITHUB_SHA-amd64" \
+            "$IMAGE:$GITHUB_SHA-arm64"
+          digest="$(docker buildx imagetools inspect "$IMAGE:$GITHUB_SHA" --format '{{json .Manifest.Digest}}' | tr -d '"')"
+          {
+            echo "Commit this line to \`observer-image\`:"
+            echo
+            echo "    $IMAGE@$digest"
+          } >> "$GITHUB_STEP_SUMMARY"
