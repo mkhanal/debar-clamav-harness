@@ -36,9 +36,10 @@ on:
         default: ""
       built-target:
         description: >-
-          When set, scan the inputs the input builder makes from every buildable extended
-          signature of this target type, and the boundary inputs below, instead of the
-          fixtures, and count how many each scanner detected under the signature it was built for.
+          When set, scan the inputs the input builder makes from the buildable signatures of this
+          target type (every extended signature by default; see extended-sample and
+          logical-sample), and the boundary inputs below, instead of the fixtures, and count how
+          many each scanner detected under the signature it was built for.
         required: false
         type: string
         default: ""
@@ -49,6 +50,16 @@ on:
         required: false
         type: string
         default: "2000"
+      extended-sample:
+        description: With built-target, how many of its extended signatures to build inputs from.
+        required: false
+        type: string
+        default: "1000000"
+      logical-sample:
+        description: With built-target, how many of its logical signatures to build inputs from.
+        required: false
+        type: string
+        default: "0"
       known-differences:
         description: The known differences to judge by, a path in the harness repository.
         required: false
@@ -94,8 +105,8 @@ jobs:
         if: inputs.built-target != ''
         run: harness/builder/build-inputs.sh built
         env:
-          EXTENDED_SAMPLE: "1000000"
-          LOGICAL_SAMPLE: "0"
+          EXTENDED_SAMPLE: ${{ inputs.extended-sample }}
+          LOGICAL_SAMPLE: ${{ inputs.logical-sample }}
           SAMPLE_TARGET: ${{ inputs.built-target }}
           BOUNDARY_SAMPLE: ${{ inputs.boundary-sample }}
       - name: Compare Debar with the reference scanner
