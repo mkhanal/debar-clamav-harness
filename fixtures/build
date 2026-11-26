@@ -1,0 +1,31 @@
+#!/bin/sh
+set -eu
+
+destination="$1"
+mkdir -p "$destination"
+
+printf '%s' 'X5O!P%@AP[4\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*' > "$destination/eicar.com"
+printf 'A clean text file with nothing to detect.\n' > "$destination/clean.txt"
+printf 'tiny' > "$destination/tiny.bin"
+
+python3 -I - "$destination" <<'PYTHON'
+import sys
+import zipfile
+
+destination = sys.argv[1]
+fixed_time = (1980, 1, 1, 0, 0, 0)
+
+
+def stored_entry(name):
+    entry = zipfile.ZipInfo(name, date_time=fixed_time)
+    entry.compress_type = zipfile.ZIP_STORED
+    entry.external_attr = 0o644 << 16
+    return entry
+
+
+with open(f"{destination}/eicar.com", "rb") as eicar:
+    eicar_bytes = eicar.read()
+with zipfile.ZipFile(f"{destination}/eicar.zip", "w") as archive:
+    archive.writestr(stored_entry("eicar.com"), eicar_bytes)
+    archive.writestr(stored_entry("clean.txt"), b"A clean entry beside the test file.\n")
+PYTHON

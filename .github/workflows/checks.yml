@@ -1,0 +1,41 @@
+name: Checks
+
+on:
+  push:
+  pull_request:
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: check (${{ matrix.runner }})
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: ./in-toolchain ./check
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+  compare-stand-in:
+    name: compare the stand-in
+    permissions:
+      contents: read
+    uses: $/.github/workflows/compare.yml
+    with:
+      harness-ref: ${{ github.sha }}
+      debar-repository: ${{ github.repository }}
+      debar-ref: ${{ github.sha }}
+      build-command: ./in-toolchain cargo build --release --locked --package debar-stand-in
+      debar-command: debar/target/release/debar-stand-in --databases "$HARNESS_DATABASES" "$HARNESS_INPUT" "$HARNESS_REPORT"

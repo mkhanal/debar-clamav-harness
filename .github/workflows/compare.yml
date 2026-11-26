@@ -1,0 +1,82 @@
+name: Compare with the reference scanner
+
+on:
+  workflow_call:
+    inputs:
+      harness-ref:
+        description: The commit of debar-clamav-harness to run. Pass the commit this workflow is pinned to.
+        required: true
+        type: string
+      debar-repository:
+        description: The repository holding the Debar under test. Defaults to the calling repository.
+        required: false
+        type: string
+        default: ""
+      debar-ref:
+        description: The Debar commit or ref under test. Defaults to the commit that triggered the caller.
+        required: false
+        type: string
+        default: ""
+      build-command:
+        description: Builds Debar, run with sh -c inside the Debar checkout.
+        required: true
+        type: string
+      debar-command:
+        description: >-
+          Writes Debar's report of one input, run with sh -c from the directory holding the
+          checkouts debar/ and harness/, with HARNESS_INPUT, HARNESS_REPORT and HARNESS_DATABASES set.
+        required: true
+        type: string
+      inputs-directory:
+        description: >-
+          The files to scan, relative to the directory holding the checkouts. Defaults to the
+          harness's own fixtures, built at run time.
+        required: false
+        type: string
+        default: ""
+
+permissions: {}
+
+jobs:
+  compare:
+    name: compare (${{ matrix.runner }})
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: mkhanal/debar-clamav-harness
+          ref: ${{ inputs.harness-ref }}
+          path: harness
+          persist-credentials: false
+      - name: Check out Debar
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ inputs.debar-repository || github.repository }}
+          ref: ${{ inputs.debar-ref || github.sha }}
+          path: debar
+          persist-credentials: false
+      - name: Build Debar
+        working-directory: debar
+        run: sh -c "$BUILD_COMMAND"
+        env:
+          BUILD_COMMAND: ${{ inputs.build-command }}
+      - name: Build the fixtures
+        if: inputs.inputs-directory == ''
+        run: harness/fixtures/build fixtures
+      - name: Compare Debar with the reference scanner
+        run: |
+          harness/run-harness run \
+            --input "${INPUTS_DIRECTORY:-fixtures}" \
+            --debar-command "$DEBAR_COMMAND" \
+            --known-differences harness/known-differences.jsonl \
+            --work-directory "$GITHUB_WORKSPACE/harness-work"
+        env:
+          INPUTS_DIRECTORY: ${{ inputs.inputs-directory }}
+          DEBAR_COMMAND: ${{ inputs.debar-command }}

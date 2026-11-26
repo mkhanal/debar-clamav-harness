@@ -1,0 +1,106 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/mkhanal/debar-clamav-harness/schema/report.schema.json",
+  "title": "Scan report record",
+  "description": "One line of a scan report in JSON Lines. A report describes one scanned input: its first line is the top-level object, and every later line is an object the scanner reached inside it, each after its parent.",
+  "oneOf": [
+    { "$ref": "#/$defs/topLevelObject" },
+    { "$ref": "#/$defs/object" }
+  ],
+  "$defs": {
+    "schemaVersion": {
+      "description": "The version of this schema the record follows.",
+      "const": 1
+    },
+    "objectId": {
+      "description": "The object's identifier, unique within one report.",
+      "type": "integer",
+      "minimum": 0
+    },
+    "depth": {
+      "description": "How deep the scanner was when it reached the object, the top-level object being 0. A child is deeper than its parent, though not necessarily by one: a scanner may pass through levels it does not report as objects.",
+      "type": "integer",
+      "minimum": 0
+    },
+    "type": {
+      "description": "The file type the scanner settled on for the object, by the reference scanner's own type names such as CL_TYPE_ZIP; null when the scanner did not type it.",
+      "type": ["string", "null"]
+    },
+    "size": {
+      "description": "The object's length in bytes.",
+      "type": "integer",
+      "minimum": 0
+    },
+    "sha256": {
+      "description": "The SHA-256 of the object's bytes, in lowercase hexadecimal.",
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "detections": {
+      "description": "The name of each signature that matched the object, once per time it was reported, in the order reported.",
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "verdict": {
+      "description": "What the scan reported for the input as a whole.",
+      "enum": ["nothing_found", "trusted", "strong_indicator", "potentially_unwanted"]
+    },
+    "scanner": {
+      "description": "Which scanner wrote the report, and the databases it had loaded.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version", "databases"],
+      "properties": {
+        "name": { "type": "string" },
+        "version": { "type": "string" },
+        "databases": {
+          "description": "Each loaded database by its file name without extension, with the version in its header, sorted by name.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "version"],
+            "properties": {
+              "name": { "type": "string" },
+              "version": { "type": "integer", "minimum": 0 }
+            }
+          }
+        }
+      }
+    },
+    "topLevelObject": {
+      "description": "The input itself. Always the first line of a report.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "id", "parent", "depth", "type", "size", "sha256", "detections", "verdict", "scanner"],
+      "properties": {
+        "schema": { "$ref": "#/$defs/schemaVersion" },
+        "id": { "$ref": "#/$defs/objectId" },
+        "parent": { "type": "null" },
+        "depth": { "const": 0 },
+        "type": { "$ref": "#/$defs/type" },
+        "size": { "$ref": "#/$defs/size" },
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "detections": { "$ref": "#/$defs/detections" },
+        "verdict": { "$ref": "#/$defs/verdict" },
+        "scanner": { "$ref": "#/$defs/scanner" }
+      }
+    },
+    "object": {
+      "description": "An object the scanner reached inside the input.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "id", "parent", "depth", "type", "size", "sha256", "detections"],
+      "properties": {
+        "schema": { "$ref": "#/$defs/schemaVersion" },
+        "id": { "$ref": "#/$defs/objectId" },
+        "parent": { "$ref": "#/$defs/objectId" },
+        "depth": { "$ref": "#/$defs/depth" },
+        "type": { "$ref": "#/$defs/type" },
+        "size": { "$ref": "#/$defs/size" },
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "detections": { "$ref": "#/$defs/detections" }
+      }
+    }
+  }
+}

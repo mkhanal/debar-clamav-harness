@@ -1,0 +1,31 @@
+#!/bin/sh
+set -eu
+
+repository="$(cd "$(dirname "$0")" && pwd)"
+
+if [ -n "${DEBAR_TOOLCHAIN_IMAGE:-}" ]; then
+    image="$DEBAR_TOOLCHAIN_IMAGE"
+else
+    image="$(cat "$repository/toolchain-image")"
+fi
+
+if [ "$#" -eq 0 ]; then
+    set -- bash
+fi
+
+set -- \
+    --volume "$repository:/work" \
+    --workdir /work \
+    --volume debar-cargo-registry:/usr/local/cargo/registry \
+    --volume debar-cargo-git:/usr/local/cargo/git \
+    --volume debar-cargo-advisory-dbs:/usr/local/cargo/advisory-dbs \
+    --env CARGO_TERM_COLOR \
+    --env CARGO_TARGET_DIR \
+    --env GH_TOKEN \
+    "$image" "$@"
+
+if [ -t 0 ] && [ -t 1 ]; then
+    set -- --tty "$@"
+fi
+
+exec docker run --rm --interactive "$@"

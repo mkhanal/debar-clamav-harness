@@ -1,0 +1,28 @@
+#!/bin/sh
+set -eu
+
+repository="$(cd "$(dirname "$0")" && pwd)"
+working_directory="$(pwd)"
+runtime_image='docker.io/library/debian:trixie-slim@sha256:8aa5a7bf5a1955bddbe7d74fcdd0b91ab30e74362a8b73af672b0481b35b44a0'
+docker_cli_image='docker.io/library/docker:28.5.2-cli@sha256:625d9431a9f54c5a2bc90f24f0e1c3d55b1349fd857dd85035f98c2c9acbdd4d'
+docker_cli="$repository/target/docker-cli/docker"
+temporary_directory="$repository/target/tmp"
+
+mkdir -p "$(dirname "$docker_cli")" "$temporary_directory"
+"$repository/in-toolchain" cargo build --release --locked --workspace >&2
+
+if [ ! -x "$docker_cli" ]; then
+    container="$(docker create "$docker_cli_image")"
+    docker cp "$container:/usr/local/bin/docker" "$docker_cli" >&2
+    docker rm "$container" > /dev/null
+fi
+
+exec docker run --rm \
+    --volume /var/run/docker.sock:/var/run/docker.sock \
+    --volume "$docker_cli:/usr/local/bin/docker:ro" \
+    --volume "$repository:$repository" \
+    --volume "$working_directory:$working_directory" \
+    --workdir "$working_directory" \
+    --env TMPDIR="$temporary_directory" \
+    --env PATH="$repository/target/release:/usr/local/bin:/usr/bin:/bin" \
+    "$runtime_image" "$repository/target/release/harness" "$@"
