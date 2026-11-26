@@ -1,0 +1,2 @@
+{"kind":"detection_only_in_reference","path":[],"gap":"HTML normalisation is not built (Debar piece 6): a page typed HTML from its first bytes is matched only through its normalised views, so every detection on these inputs is the reference's alone"}
+{"kind":"verdict_differs","reference":"strong_indicator","debar":"nothing_found","gap":"HTML normalisation is not built (Debar piece 6): the page's only detections come from its normalised views"}

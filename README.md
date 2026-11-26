@@ -13,7 +13,8 @@ The comparison harness for [Debar](https://github.com/mkhanal/debar) and the Cla
 | `builder/` | The input builder: turns each pattern signature into a file it must match, and proves those files against the reference scanner |
 | `stand-in/` | `debar-stand-in`, which writes a valid report of the top-level object alone, to prove the Debar side until Debar can scan |
 | `known-differences.jsonl` | The ratchet for the stand-in: every difference already known |
-| `debar-known-differences.jsonl` | The ratchet for Debar, which Debar's CI judges by |
+| `debar-known-differences.jsonl` | The ratchet for Debar, which Debar's CI judges its fixtures and its inputs built for targets 0 and 4 by |
+| `debar-known-differences-web-pages.jsonl`, `debar-known-differences-text.jsonl` | Debar's ratchets for inputs built for targets 3 and 7, whose detections come only from normalised content Debar does not build yet |
 | `fixtures/build` | Builds the small fixture files CI compares: the EICAR test file, a zip holding it beside a clean file, a clean text file and a file too small to scan |
 | `builder/build-inputs.sh` | Unpacks the pinned databases and builds a sample of inputs with the builder |
 | `builder/prove-against-reference.sh` | Proves built inputs against the reference scanner |
@@ -128,6 +129,7 @@ The order in which either side reached its children never matters, only their co
 
 - A difference on the list is known and does not fail the run. A line naming an input covers one occurrence, and must match the difference exactly.
 - A line naming no input is a rule: it covers every difference, on any input and any number of times, whose fields include all of the rule's fields. `{"kind":"type_differs","debar":null}` covers every object Debar did not type. A rule that covered nothing in a run is reported, without failing it.
+- A line may say in a `gap` field which missing piece of the scanner under test it stands for, as a sentence. The field is the line's explanation and is never matched against a difference.
 - A difference not on the list is new and fails the run.
 - A line for an input that was compared, matching no difference, no longer occurs: the run reports it so the line can be removed. It does not fail the run, so a Debar change that closes a gap is not blocked on this repository.
 
@@ -182,7 +184,7 @@ jobs:
       debar-command: debar/target/release/debar <arguments that scan "$HARNESS_INPUT" with the databases in "$HARNESS_DATABASES" and write the report to "$HARNESS_REPORT">
 ```
 
-With `built-target: "0"` it scans, instead of the fixtures, an input built from every buildable extended signature of that target type plus `boundary-sample` (default 2,000) signatures across a 128 KiB boundary, and reports how many each scanner detected under the signature each input was built for. `known-differences` names the ratchet file to judge by (default `known-differences.jsonl`); Debar passes `debar-known-differences.jsonl`.
+With `built-target: "0"` it scans, instead of the fixtures, an input built from every buildable extended signature of that target type plus `boundary-sample` (default 2,000) signatures across a 128 KiB boundary, and reports how many each scanner detected under the signature each input was built for. `known-differences` names the ratchet file to judge by (default `known-differences.jsonl`); Debar passes `debar-known-differences.jsonl`, or for targets 3 and 7 the ratchet named for that target's content.
 
 It runs on amd64 and arm64. It checks out this repository at `harness-ref` into `harness/` and Debar (by default the calling repository at the triggering commit; `debar-repository` and `debar-ref` override them) into `debar/`, runs `build-command` inside `debar/`, builds the fixtures unless `inputs-directory` names others, and runs `harness/run-harness run` from the directory holding both checkouts with this repository's known differences. This repository's own CI calls the same workflow with the stand-in as Debar.
 

@@ -1,0 +1,3 @@
+{"kind":"detection_only_in_reference","path":[],"gap":"The script normaliser is not built (Debar piece 6): text-target signatures, and generic ones only in lower-cased text, match the normalised text alone"}
+{"kind":"verdict_differs","reference":"strong_indicator","debar":"nothing_found","gap":"The script normaliser is not built (Debar piece 6): the input's only detections come from its normalised text"}
+{"kind":"detection_count_differs","path":[],"reference":2,"debar":1,"gap":"The reference matches text twice, raw and normalised (Debar piece 6); Debar reports each signature once per object"}

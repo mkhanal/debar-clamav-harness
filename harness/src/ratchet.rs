@@ -8,6 +8,7 @@ use serde_json::{Map, Value};
 use crate::difference::Difference;
 
 const INPUT_FIELD: &str = "input";
+const GAP_FIELD: &str = "gap";
 
 #[derive(Debug, Default)]
 pub struct KnownDifferences {
@@ -61,8 +62,16 @@ impl KnownDifferences {
                 continue;
             }
             let malformed = |reason: String| KnownDifferencesError::Malformed { line, reason };
-            let fields: Map<String, Value> =
+            let mut fields: Map<String, Value> =
                 serde_json::from_str(&text).map_err(|error| malformed(error.to_string()))?;
+            match fields.remove(GAP_FIELD) {
+                None | Some(Value::String(_)) => {}
+                Some(_) => {
+                    return Err(malformed(
+                        "the gap a line names is a sentence of text".to_owned(),
+                    ));
+                }
+            }
             if fields.contains_key(INPUT_FIELD) {
                 let entry = serde_json::from_value(Value::Object(fields))
                     .map_err(|error| malformed(error.to_string()))?;

@@ -150,3 +150,23 @@ fn a_line_with_neither_an_input_nor_a_kind_is_malformed() {
         Err(KnownDifferencesError::Malformed { line: 1, .. })
     ));
 }
+
+#[test]
+fn the_gap_a_line_names_is_read_as_its_explanation_and_not_matched() {
+    let known = rules(
+        r#"{"kind":"detection_only_in_reference","signature":"Eicar","gap":"normalised text is not built yet"}"#,
+    );
+
+    let judgement = known.judge(&inputs(&[1]), vec![missed_detection(1, "Eicar")]);
+
+    assert_eq!(judgement.known.len(), 1);
+    assert!(!judgement.fails());
+}
+
+#[test]
+fn a_gap_that_is_not_text_is_malformed() {
+    assert!(matches!(
+        KnownDifferences::read(r#"{"kind":"type_differs","gap":3}"#.as_bytes()),
+        Err(KnownDifferencesError::Malformed { line: 1, .. })
+    ));
+}
