@@ -11,6 +11,9 @@ use crate::pattern_signature::{CharacterWidth, PatternSignature, SignatureForm, 
 
 pub const MANIFEST_FILE_NAME: &str = "manifest.tsv";
 pub const INPUTS_DIRECTORY_NAME: &str = "inputs";
+pub const BOUNDARY_AT: usize = 131_072;
+const BOUNDARY_FILLER: u8 = b'.';
+const BOUNDARY_SHARES: [(usize, usize); 3] = [(1, 4), (1, 2), (3, 4)];
 
 pub struct SampleRequest<'request> {
     pub database_directory: &'request Path,
@@ -18,12 +21,15 @@ pub struct SampleRequest<'request> {
     pub extended_count: usize,
     pub logical_count: usize,
     pub seed: u64,
+    pub target: Option<u32>,
+    pub boundary_count: usize,
 }
 
 struct Candidate {
     database: String,
     line: String,
     form: SignatureForm,
+    anywhere: bool,
     bytes: Vec<u8>,
 }
 
@@ -48,14 +54,26 @@ pub fn write_sample(request: &SampleRequest<'_>) -> io::Result<usize> {
             let Some(Ok(signature)) = kind.parse(&line) else {
                 continue;
             };
-            if ignored.contains(&signature.name) {
+            if ignored.contains(&signature.name)
+                || request
+                    .target
+                    .is_some_and(|target| target != signature.target_code)
+            {
                 continue;
             }
             if let Ok(bytes) = build_input(&signature) {
+                let anywhere = signature.form == SignatureForm::Extended
+                    && signature.subsignatures.iter().all(|subsignature| {
+                        matches!(
+                            subsignature,
+                            Subsignature::Body(body) if body.offset == PatternOffset::Anywhere
+                        )
+                    });
                 let candidate = Candidate {
                     database: database.clone(),
                     line,
                     form: signature.form,
+                    anywhere,
                     bytes,
                 };
                 match signature.form {
@@ -68,11 +86,32 @@ pub fn write_sample(request: &SampleRequest<'_>) -> io::Result<usize> {
     let mut shuffle = SeededShuffle::new(request.seed);
     shuffle.shuffle(&mut extended);
     shuffle.shuffle(&mut logical);
-    extended.truncate(request.extended_count);
-    logical.truncate(request.logical_count);
+    let boundary: Vec<&Candidate> = extended
+        .iter()
+        .filter(|candidate| candidate.anywhere)
+        .take(request.boundary_count)
+        .collect();
     let inputs = request.output_directory.join(INPUTS_DIRECTORY_NAME);
     std::fs::create_dir_all(&inputs)?;
     let mut manifest = String::new();
+    let mut boundary_written = 0usize;
+    for (index, candidate) in boundary.iter().enumerate() {
+        for (variant, bytes) in across_the_128_kib_boundary(&candidate.bytes)
+            .into_iter()
+            .enumerate()
+        {
+            let file_name = format!("b{index:05}-{variant}.bin");
+            std::fs::write(inputs.join(&file_name), bytes)?;
+            let _ = writeln!(
+                manifest,
+                "{file_name}\t{}\t{}",
+                candidate.database, candidate.line
+            );
+            boundary_written = boundary_written.saturating_add(1);
+        }
+    }
+    extended.truncate(request.extended_count);
+    logical.truncate(request.logical_count);
     for (index, candidate) in extended.iter().chain(logical.iter()).enumerate() {
         let file_name = format!(
             "{}{index:05}.bin",
@@ -89,7 +128,29 @@ pub fn write_sample(request: &SampleRequest<'_>) -> io::Result<usize> {
         );
     }
     std::fs::write(request.output_directory.join(MANIFEST_FILE_NAME), manifest)?;
-    Ok(extended.len().saturating_add(logical.len()))
+    Ok(extended
+        .len()
+        .saturating_add(logical.len())
+        .saturating_add(boundary_written))
+}
+
+#[must_use]
+pub fn across_the_128_kib_boundary(built: &[u8]) -> Vec<Vec<u8>> {
+    BOUNDARY_SHARES
+        .iter()
+        .map(|(numerator, denominator)| {
+            let before_boundary = built
+                .len()
+                .saturating_mul(*numerator)
+                .checked_div(*denominator)
+                .unwrap_or(0)
+                .max(1);
+            let filler = BOUNDARY_AT.saturating_sub(before_boundary);
+            let mut bytes = vec![BOUNDARY_FILLER; filler];
+            bytes.extend_from_slice(built);
+            bytes
+        })
+        .collect()
 }
 
 struct SeededShuffle {
@@ -271,6 +332,17 @@ mod tests {
         SeededShuffle::new(7).shuffle(&mut second);
         assert_eq!(first, second);
         assert_ne!(first, (0..50).collect::<Vec<u32>>());
+    }
+
+    #[test]
+    fn boundary_inputs_put_the_128_kib_boundary_inside_the_built_bytes() {
+        let built = vec![b'x'; 100];
+        for input in across_the_128_kib_boundary(&built) {
+            let start = input.len() - built.len();
+            assert!(start < BOUNDARY_AT);
+            assert!(input.len() > BOUNDARY_AT);
+            assert_eq!(&input[start..], &built[..]);
+        }
     }
 
     #[test]

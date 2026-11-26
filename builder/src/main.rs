@@ -12,6 +12,7 @@ const USAGE: &str = "usage:
   builder build --database <file> --signature <name> --out <file>
   builder survey --database-dir <dir> [--details <file>]
   builder sample --database-dir <dir> --out-dir <dir> [--extended <n>] [--logical <n>] [--seed <n>]
+                 [--target <n>] [--boundary <n>]
   builder check --manifest <file> --scan-output <file> [--failures <file>]";
 
 const DEFAULT_EXTENDED_SAMPLE: usize = 2000;
@@ -166,6 +167,12 @@ fn sample(options: &Options) -> Result<(), CommandError> {
         extended_count: options.number("extended", DEFAULT_EXTENDED_SAMPLE)?,
         logical_count: options.number("logical", DEFAULT_LOGICAL_SAMPLE)?,
         seed: options.number("seed", DEFAULT_SEED)?,
+        target: options
+            .values
+            .contains_key("target")
+            .then(|| options.number("target", 0))
+            .transpose()?,
+        boundary_count: options.number("boundary", 0)?,
     })
     .map_err(io_error(output_directory))?;
     println!("wrote {written} inputs to {}", output_directory.display());
