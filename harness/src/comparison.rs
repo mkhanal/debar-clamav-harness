@@ -121,24 +121,45 @@ impl Comparison<'_> {
     }
 
     fn compare_detections(&mut self, path: &ObjectPath, reference: &[String], debar: &[String]) {
-        let mut unmatched_in_debar: Vec<Option<&String>> = debar.iter().map(Some).collect();
-        for signature in reference {
-            let counterpart = unmatched_in_debar
-                .iter_mut()
-                .find(|candidate| *candidate == &Some(signature));
-            match counterpart {
-                Some(matched) => *matched = None,
-                None => self.kinds.push(DifferenceKind::DetectionOnlyInReference {
-                    path: path.clone(),
-                    signature: signature.clone(),
-                }),
+        let times = |reports: &[String], signature: &String| {
+            u32::try_from(reports.iter().filter(|report| *report == signature).count())
+                .unwrap_or(u32::MAX)
+        };
+        let mut seen: Vec<&String> = Vec::new();
+        for signature in reference.iter().chain(debar) {
+            if seen.contains(&signature) {
+                continue;
             }
-        }
-        for signature in unmatched_in_debar.into_iter().flatten() {
-            self.kinds.push(DifferenceKind::DetectionOnlyInDebar {
-                path: path.clone(),
-                signature: signature.clone(),
-            });
+            seen.push(signature);
+            let in_reference = times(reference, signature);
+            let in_debar = times(debar, signature);
+            match (in_reference, in_debar) {
+                (_, 0) => {
+                    for _ in 0..in_reference {
+                        self.kinds.push(DifferenceKind::DetectionOnlyInReference {
+                            path: path.clone(),
+                            signature: signature.clone(),
+                        });
+                    }
+                }
+                (0, _) => {
+                    for _ in 0..in_debar {
+                        self.kinds.push(DifferenceKind::DetectionOnlyInDebar {
+                            path: path.clone(),
+                            signature: signature.clone(),
+                        });
+                    }
+                }
+                (reference_count, debar_count) if reference_count != debar_count => {
+                    self.kinds.push(DifferenceKind::DetectionCountDiffers {
+                        path: path.clone(),
+                        signature: signature.clone(),
+                        reference: reference_count,
+                        debar: debar_count,
+                    });
+                }
+                _ => {}
+            }
         }
     }
 

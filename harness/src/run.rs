@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::fs::{self, File};
 use std::io::{self, BufReader};
@@ -19,17 +19,29 @@ pub struct RunSettings {
     pub observer: Observer,
     pub known_differences: KnownDifferences,
     pub work_directory: PathBuf,
+    pub manifest: Option<PathBuf>,
 }
 
 pub struct ComparedInput {
     pub name: String,
     pub input: Sha256,
     pub differences: Vec<Difference>,
+    pub reference_detections: BTreeSet<String>,
+    pub debar_detections: BTreeSet<String>,
 }
 
 pub struct Outcome {
     pub compared: Vec<ComparedInput>,
     pub judgement: Judgement,
+    pub built_inputs: Option<BuiltInputs>,
+}
+
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct BuiltInputs {
+    pub inputs: usize,
+    pub detected_by_reference: usize,
+    pub detected_by_both: usize,
+    pub detected_by_debar_only: usize,
 }
 
 #[derive(Debug)]
@@ -45,6 +57,10 @@ pub enum RunError {
         path: PathBuf,
         error: ReportError,
     },
+    Manifest {
+        path: PathBuf,
+        error: io::Error,
+    },
     DifferentInputs {
         name: String,
         error: DifferentInputs,
@@ -58,6 +74,10 @@ struct WorkDirectory {
 }
 
 pub fn run(settings: &RunSettings) -> Result<Outcome, RunError> {
+    let built_for = match &settings.manifest {
+        Some(path) => Some(read_manifest(path)?),
+        None => None,
+    };
     let inputs = Inputs::find(&settings.input).map_err(RunError::Inputs)?;
     let work = WorkDirectory::prepare(&settings.work_directory)?;
     settings
@@ -90,7 +110,70 @@ pub fn run(settings: &RunSettings) -> Result<Outcome, RunError> {
             &debar_report,
         )?);
     }
-    Ok(judge(&settings.known_differences, compared))
+    let mut outcome = judge(&settings.known_differences, compared);
+    outcome.built_inputs =
+        built_for.map(|built_for| summarise_built_inputs(&built_for, &outcome.compared));
+    Ok(outcome)
+}
+
+pub fn read_manifest(path: &Path) -> Result<BTreeMap<String, String>, RunError> {
+    let text = fs::read_to_string(path).map_err(|error| RunError::Manifest {
+        path: path.to_owned(),
+        error,
+    })?;
+    Ok(built_for_signatures(&text))
+}
+
+#[must_use]
+pub fn built_for_signatures(manifest: &str) -> BTreeMap<String, String> {
+    manifest
+        .lines()
+        .filter_map(|row| {
+            let mut fields = row.splitn(3, '\t');
+            let file_name = fields.next()?;
+            let line = fields.nth(1)?;
+            let signature = line.split([':', ';']).next()?;
+            Some((file_name.to_owned(), signature.to_owned()))
+        })
+        .collect()
+}
+
+#[must_use]
+pub fn summarise_built_inputs(
+    built_for: &BTreeMap<String, String>,
+    compared: &[ComparedInput],
+) -> BuiltInputs {
+    let mut summary = BuiltInputs::default();
+    for input in compared {
+        let file_name = Path::new(&input.name)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or(&input.name);
+        let Some(signature) = built_for.get(file_name) else {
+            continue;
+        };
+        summary.inputs = summary.inputs.saturating_add(1);
+        let by_reference = input.reference_detections.contains(signature);
+        let by_debar = input.debar_detections.contains(signature);
+        if by_reference {
+            summary.detected_by_reference = summary.detected_by_reference.saturating_add(1);
+        }
+        match (by_reference, by_debar) {
+            (true, true) => summary.detected_by_both = summary.detected_by_both.saturating_add(1),
+            (false, true) => {
+                summary.detected_by_debar_only = summary.detected_by_debar_only.saturating_add(1);
+            }
+            _ => {}
+        }
+    }
+    summary
+}
+
+fn every_detection(report: &Report) -> BTreeSet<String> {
+    report
+        .objects()
+        .flat_map(|object| object.detections.iter().cloned())
+        .collect()
 }
 
 pub fn compare_reports(
@@ -108,6 +191,8 @@ pub fn compare_reports(
         name,
         input: reference.top_level().sha256,
         differences,
+        reference_detections: every_detection(&reference),
+        debar_detections: every_detection(&debar),
     })
 }
 
@@ -121,6 +206,7 @@ pub fn judge(known: &KnownDifferences, compared: Vec<ComparedInput>) -> Outcome 
     Outcome {
         judgement: known.judge(&inputs_compared, differences),
         compared,
+        built_inputs: None,
     }
 }
 
@@ -164,6 +250,13 @@ impl fmt::Display for RunError {
             Self::Observer(error) => error.fmt(formatter),
             Self::DebarCommand(error) => error.fmt(formatter),
             Self::Report { path, error } => write!(formatter, "{}: {error}", path.display()),
+            Self::Manifest { path, error } => {
+                write!(
+                    formatter,
+                    "cannot read the manifest {}: {error}",
+                    path.display()
+                )
+            }
             Self::DifferentInputs { name, error } => write!(formatter, "{name}: {error}"),
         }
     }

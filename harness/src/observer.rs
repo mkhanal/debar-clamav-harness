@@ -10,7 +10,7 @@ pub const PINNED_IMAGE: &str = include_str!("../../observer-image");
 const DATABASE_DIRECTORY_IN_IMAGE: &str = "/var/lib/clamav/.";
 const INPUT_MOUNT: &str = "/input";
 const REPORT_MOUNT: &str = "/reports";
-const INPUTS_PER_CONTAINER: usize = 200;
+const INPUTS_PER_CONTAINER: usize = 2000;
 
 #[derive(Debug)]
 pub struct Observer {

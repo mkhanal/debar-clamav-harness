@@ -3,12 +3,38 @@ use std::fmt;
 use std::io::BufRead;
 
 use harness_report::Sha256;
+use serde_json::{Map, Value};
 
 use crate::difference::Difference;
+
+const INPUT_FIELD: &str = "input";
 
 #[derive(Debug, Default)]
 pub struct KnownDifferences {
     entries: Vec<Difference>,
+    rules: Vec<KnownRule>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct KnownRule {
+    fields: Map<String, Value>,
+}
+
+impl KnownRule {
+    fn covers(&self, difference: &Difference) -> bool {
+        let Ok(Value::Object(fields)) = serde_json::to_value(difference) else {
+            return false;
+        };
+        self.fields
+            .iter()
+            .all(|(name, value)| fields.get(name) == Some(value))
+    }
+}
+
+impl fmt::Display for KnownRule {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "{}", Value::Object(self.fields.clone()))
+    }
 }
 
 #[derive(Debug, Default)]
@@ -16,6 +42,7 @@ pub struct Judgement {
     pub new: Vec<Difference>,
     pub known: Vec<Difference>,
     pub no_longer_occurring: Vec<Difference>,
+    pub rules_not_used: Vec<KnownRule>,
 }
 
 #[derive(Debug)]
@@ -27,29 +54,38 @@ pub enum KnownDifferencesError {
 impl KnownDifferences {
     pub fn read(input: impl BufRead) -> Result<Self, KnownDifferencesError> {
         let mut entries = Vec::new();
+        let mut rules = Vec::new();
         for (line, text) in (1..).zip(input.lines()) {
             let text = text.map_err(KnownDifferencesError::Io)?;
             if text.trim().is_empty() {
                 continue;
             }
-            let entry =
-                serde_json::from_str(&text).map_err(|error| KnownDifferencesError::Malformed {
-                    line,
-                    reason: error.to_string(),
-                })?;
-            entries.push(entry);
+            let malformed = |reason: String| KnownDifferencesError::Malformed { line, reason };
+            let fields: Map<String, Value> =
+                serde_json::from_str(&text).map_err(|error| malformed(error.to_string()))?;
+            if fields.contains_key(INPUT_FIELD) {
+                let entry = serde_json::from_value(Value::Object(fields))
+                    .map_err(|error| malformed(error.to_string()))?;
+                entries.push(entry);
+            } else if fields.contains_key("kind") {
+                rules.push(KnownRule { fields });
+            } else {
+                return Err(malformed(
+                    "a line without an input is a rule, and names at least the kind".to_owned(),
+                ));
+            }
         }
-        Ok(Self { entries })
+        Ok(Self { entries, rules })
     }
 
     #[must_use]
     pub fn len(&self) -> usize {
-        self.entries.len()
+        self.entries.len().saturating_add(self.rules.len())
     }
 
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.entries.is_empty()
+        self.entries.is_empty() && self.rules.is_empty()
     }
 
     #[must_use]
@@ -64,20 +100,34 @@ impl KnownDifferences {
             .filter(|entry| inputs_compared.contains(&entry.input))
             .map(Some)
             .collect();
+        let mut rule_used = vec![false; self.rules.len()];
         let mut judgement = Judgement::default();
         for difference in differences {
             let entry = unused
                 .iter_mut()
                 .find(|entry| entry.is_some_and(|known| known == &difference));
-            match entry {
+            if let Some(used) = entry {
+                *used = None;
+                judgement.known.push(difference);
+                continue;
+            }
+            let rule = self.rules.iter().position(|rule| rule.covers(&difference));
+            match rule.and_then(|index| rule_used.get_mut(index)) {
                 Some(used) => {
-                    *used = None;
+                    *used = true;
                     judgement.known.push(difference);
                 }
                 None => judgement.new.push(difference),
             }
         }
         judgement.no_longer_occurring = unused.into_iter().flatten().cloned().collect();
+        judgement.rules_not_used = self
+            .rules
+            .iter()
+            .zip(rule_used)
+            .filter(|(_, used)| !used)
+            .map(|(rule, _)| rule.clone())
+            .collect();
         judgement
     }
 }

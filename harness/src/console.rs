@@ -26,6 +26,26 @@ pub fn print_outcome(outcome: &Outcome, output: &mut impl Write) -> io::Result<(
         "Known differences that no longer occur. Remove their lines from the known differences.",
         &judgement.no_longer_occurring,
     )?;
+    if !judgement.rules_not_used.is_empty() {
+        writeln!(
+            output,
+            "Known-difference rules that covered nothing in this run. Remove them once no input needs them."
+        )?;
+        for rule in &judgement.rules_not_used {
+            writeln!(output, "    {rule}")?;
+        }
+        writeln!(output)?;
+    }
+    if let Some(built) = &outcome.built_inputs {
+        writeln!(
+            output,
+            "Built inputs: {} of {} detected by the reference under the signature each was built for; Debar detected {} of those, and {} others.",
+            built.detected_by_reference,
+            built.inputs,
+            built.detected_by_both,
+            built.detected_by_debar_only
+        )?;
+    }
     writeln!(
         output,
         "{} inputs compared: {} new, {} known, {} no longer occurring.",

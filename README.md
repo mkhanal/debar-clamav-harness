@@ -12,8 +12,10 @@ The comparison harness for [Debar](https://github.com/mkhanal/debar) and the Cla
 | `harness/` | The `harness` command: `compare` two reports, or `run` both scanners over inputs and compare |
 | `builder/` | The input builder: turns each pattern signature into a file it must match, and proves those files against the reference scanner |
 | `stand-in/` | `debar-stand-in`, which writes a valid report of the top-level object alone, to prove the Debar side until Debar can scan |
-| `known-differences.jsonl` | The ratchet: every difference already known |
+| `known-differences.jsonl` | The ratchet for the stand-in: every difference already known |
+| `debar-known-differences.jsonl` | The ratchet for Debar, which Debar's CI judges by |
 | `fixtures/build` | Builds the small fixture files CI compares: the EICAR test file, a zip holding it beside a clean file, a clean text file and a file too small to scan |
+| `builder/build-inputs.sh` | Unpacks the pinned databases and builds a sample of inputs with the builder |
 | `builder/prove-against-reference.sh` | Proves built inputs against the reference scanner |
 | `.github/workflows/compare.yml` | The reusable workflow Debar's CI calls |
 
@@ -38,6 +40,7 @@ fixtures/build target/fixtures
 ```text
 harness run --input FILE_OR_DIRECTORY --debar-command COMMAND
             [--known-differences FILE] [--observer-image IMAGE] [--work-directory DIRECTORY]
+            [--manifest FILE]
 ```
 
 1. Every regular file under the input is an input, in name order.
@@ -45,6 +48,7 @@ harness run --input FILE_OR_DIRECTORY --debar-command COMMAND
 3. The observer scans every input in one container, with no network.
 4. `COMMAND` runs under `sh -c` once per input, with `HARNESS_INPUT` (the file to scan), `HARNESS_REPORT` (where to write its report) and `HARNESS_DATABASES` (the directory of databases) set. It must write a report in the schema below and exit 0; any other exit stops the run.
 5. Each pair of reports is compared, and the differences are judged against the known differences.
+6. With `--manifest`, the builder's `manifest.tsv` for the inputs, the run also counts how many inputs each scanner detected under the signature the input was built for.
 
 ### `harness compare`
 
@@ -111,7 +115,8 @@ The order in which either side reached its children never matters, only their co
 | `depth_differs` | A paired object was reached at another depth |
 | `size_differs` | A paired object's length differs |
 | `hash_differs` | A paired object's content differs at the same length |
-| `detection_only_in_reference`, `detection_only_in_debar` | A signature reported on a paired object more often by one side, once per extra report |
+| `detection_only_in_reference`, `detection_only_in_debar` | A signature one side reported on a paired object and the other never did, once per report |
+| `detection_count_differs` | A signature both sides reported on a paired object, a different number of times, with both counts |
 
 ## The ratchet
 
@@ -121,13 +126,14 @@ The order in which either side reached its children never matters, only their co
 {"input":"275a021bbfb6489e54d471899f7db9d1663fc695ec2fe2a2c4538aabf651fd0f","kind":"detection_only_in_reference","path":[],"signature":"Eicar-Signature"}
 ```
 
-- A difference on the list is known and does not fail the run. Each line covers one occurrence, and must match the difference exactly.
+- A difference on the list is known and does not fail the run. A line naming an input covers one occurrence, and must match the difference exactly.
+- A line naming no input is a rule: it covers every difference, on any input and any number of times, whose fields include all of the rule's fields. `{"kind":"type_differs","debar":null}` covers every object Debar did not type. A rule that covered nothing in a run is reported, without failing it.
 - A difference not on the list is new and fails the run.
 - A line for an input that was compared, matching no difference, no longer occurs: the run reports it so the line can be removed. It does not fail the run, so a Debar change that closes a gap is not blocked on this repository.
 
 The list only shrinks as Debar's pieces land. A line is added only when a person accepts the difference, in a commit that says why.
 
-Today the list holds what the stand-in cannot do: it types nothing, extracts nothing and detects nothing.
+`known-differences.jsonl` holds what the stand-in cannot do: it types nothing, extracts nothing and detects nothing. `debar-known-differences.jsonl` holds what Debar does not yet do, which shrinks as its pieces land.
 
 ## The input builder
 
@@ -137,6 +143,7 @@ Today the list holds what the stand-in cannot do: it types nothing, extracts not
 builder survey --database-dir DIR [--details FILE]     account for every signature: built, or why not
 builder build --database FILE --signature NAME --out FILE
 builder sample --database-dir DIR --out-dir DIR [--extended N] [--logical N] [--seed N]
+               [--target N] [--boundary N]
 builder check --manifest FILE --scan-output FILE [--failures FILE]
 ```
 
@@ -150,6 +157,10 @@ Of the 3,641,493 signatures in the pinned `main` and `daily` databases, **42,530
 | Needs a `Container:` or `Intermediates:` condition | 2,177 |
 | Needs a regular-expression, byte-comparison or image fuzzy hash subsignature | 348 |
 | Other reasons: normalised content, functionality level, ignore lists, conflicting offsets, unreadable | 487 |
+
+`builder sample --target N` draws only signatures of target type `N`. `--boundary N` also writes, for the first `N` drawn extended signatures placed anywhere, three inputs that put the built bytes across the file's first 128 KiB boundary, a quarter, half and three quarters of the way in (`b00000-0.bin` and on, in the same manifest).
+
+`builder/build-inputs.sh WORK_DIRECTORY` unpacks `main` and `daily` and builds a sample into `WORK_DIRECTORY/sample`, set by `EXTENDED_SAMPLE`, `LOGICAL_SAMPLE`, `SAMPLE_SEED`, `SAMPLE_TARGET` and `BOUNDARY_SAMPLE`.
 
 `builder/prove-against-reference.sh WORK_DIRECTORY` unpacks `main` and `daily` from the pinned ClamAV image with `sigtool`, builds a sample of inputs in the toolchain image, scans them with that image's `clamscan --allmatch --no-summary --disable-cache`, and fails on any input not detected by the signature it was built for. `EXTENDED_SAMPLE`, `LOGICAL_SAMPLE` and `SAMPLE_SEED` set the sample; the sample is drawn by a small seeded shuffle of the builder's own, so the same seed draws the same signatures whatever crate versions change. The `Builder proof` workflow proves the seed-1 sample (2,500 inputs) on every change and every buildable signature weekly.
 
@@ -170,6 +181,8 @@ jobs:
       build-command: ./in-toolchain cargo build --release --locked
       debar-command: debar/target/release/debar <arguments that scan "$HARNESS_INPUT" with the databases in "$HARNESS_DATABASES" and write the report to "$HARNESS_REPORT">
 ```
+
+With `built-target: "0"` it scans, instead of the fixtures, an input built from every buildable extended signature of that target type plus `boundary-sample` (default 2,000) signatures across a 128 KiB boundary, and reports how many each scanner detected under the signature each input was built for. `known-differences` names the ratchet file to judge by (default `known-differences.jsonl`); Debar passes `debar-known-differences.jsonl`.
 
 It runs on amd64 and arm64. It checks out this repository at `harness-ref` into `harness/` and Debar (by default the calling repository at the triggering commit; `debar-repository` and `debar-ref` override them) into `debar/`, runs `build-command` inside `debar/`, builds the fixtures unless `inputs-directory` names others, and runs `harness/run-harness run` from the directory holding both checkouts with this repository's known differences. This repository's own CI calls the same workflow with the stand-in as Debar.
 

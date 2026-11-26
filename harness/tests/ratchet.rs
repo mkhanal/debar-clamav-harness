@@ -111,3 +111,42 @@ fn a_malformed_line_in_the_known_list_is_named() {
         Err(KnownDifferencesError::Malformed { line: 2, .. })
     ));
 }
+
+fn rules(lines: &str) -> KnownDifferences {
+    KnownDifferences::read(lines.as_bytes()).unwrap()
+}
+
+#[test]
+fn a_line_without_an_input_is_a_rule_covering_every_difference_with_its_fields() {
+    let known = rules(r#"{"kind":"detection_only_in_reference","signature":"Eicar"}"#);
+
+    let judgement = known.judge(
+        &inputs(&[1, 2]),
+        vec![
+            missed_detection(1, "Eicar"),
+            missed_detection(1, "Eicar"),
+            missed_detection(2, "Eicar"),
+            missed_detection(2, "Other"),
+        ],
+    );
+
+    assert_eq!(judgement.known.len(), 3);
+    assert_eq!(judgement.new, [missed_detection(2, "Other")]);
+    assert_eq!(judgement.rules_not_used, Vec::new());
+}
+
+#[test]
+fn a_rule_that_covers_nothing_in_a_run_is_reported_without_failing() {
+    let judgement = rules(r#"{"kind":"type_differs","debar":null}"#).judge(&inputs(&[1]), vec![]);
+
+    assert_eq!(judgement.rules_not_used.len(), 1);
+    assert!(!judgement.fails());
+}
+
+#[test]
+fn a_line_with_neither_an_input_nor_a_kind_is_malformed() {
+    assert!(matches!(
+        KnownDifferences::read(r#"{"signature":"Eicar"}"#.as_bytes()),
+        Err(KnownDifferencesError::Malformed { line: 1, .. })
+    ));
+}

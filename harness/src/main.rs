@@ -14,10 +14,13 @@ const USAGE: &str = "usage:
   harness compare --reference REPORT --debar REPORT [--known-differences FILE]
   harness run --input FILE_OR_DIRECTORY --debar-command COMMAND
               [--known-differences FILE] [--observer-image IMAGE] [--work-directory DIRECTORY]
+              [--manifest FILE]
 
 harness run scans every file of the input with the reference observer and with COMMAND,
 which runs under sh -c with HARNESS_INPUT, HARNESS_REPORT and HARNESS_DATABASES set,
-and must write the report of HARNESS_INPUT to HARNESS_REPORT.
+and must write the report of HARNESS_INPUT to HARNESS_REPORT. With --manifest, the builder's
+manifest of the inputs, it also counts how many inputs each scanner detected under the
+signature the input was built for.
 
 Exit status: 0 when every difference is a known one, 1 when a new difference was found,
 2 when the comparison could not be made.";
@@ -38,6 +41,7 @@ enum Task {
         known_differences: Option<PathBuf>,
         observer_image: Option<String>,
         work_directory: Option<PathBuf>,
+        manifest: Option<PathBuf>,
     },
 }
 
@@ -70,6 +74,7 @@ fn perform(task: Task) -> Result<bool, String> {
             known_differences,
             observer_image,
             work_directory,
+            manifest,
         } => {
             let settings = RunSettings {
                 input,
@@ -79,6 +84,7 @@ fn perform(task: Task) -> Result<bool, String> {
                 known_differences: read_known_differences(known_differences.as_deref())?,
                 work_directory: work_directory
                     .unwrap_or_else(|| std::env::temp_dir().join(DEFAULT_WORK_DIRECTORY_NAME)),
+                manifest,
             };
             run(&settings).map_err(|error| error.to_string())?
         }
@@ -125,6 +131,7 @@ fn parse_task(arguments: Vec<OsString>) -> Result<Task, String> {
                 .transpose()
                 .map_err(|_| "--observer-image must be valid UTF-8".to_owned())?,
             work_directory: options.work_directory.map(PathBuf::from),
+            manifest: options.manifest.map(PathBuf::from),
         }),
         _ => Err(USAGE.to_owned()),
     }
@@ -139,6 +146,7 @@ struct Options {
     known_differences: Option<OsString>,
     observer_image: Option<OsString>,
     work_directory: Option<OsString>,
+    manifest: Option<OsString>,
 }
 
 impl Options {
@@ -151,6 +159,7 @@ impl Options {
             Some("--known-differences") => &mut self.known_differences,
             Some("--observer-image") => &mut self.observer_image,
             Some("--work-directory") => &mut self.work_directory,
+            Some("--manifest") => &mut self.manifest,
             _ => return Err(format!("unknown option {}\n{USAGE}", flag.display())),
         };
         *slot = Some(value);

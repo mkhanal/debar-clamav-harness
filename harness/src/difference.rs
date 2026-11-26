@@ -65,6 +65,12 @@ pub enum DifferenceKind {
         path: ObjectPath,
         signature: String,
     },
+    DetectionCountDiffers {
+        path: ObjectPath,
+        signature: String,
+        reference: u32,
+        debar: u32,
+    },
 }
 
 impl ObjectPath {
@@ -175,6 +181,15 @@ impl fmt::Display for DifferenceKind {
             Self::DetectionOnlyInDebar { path, signature } => {
                 write!(formatter, "detection only in Debar at {path}: {signature}")
             }
+            Self::DetectionCountDiffers {
+                path,
+                signature,
+                reference,
+                debar,
+            } => write!(
+                formatter,
+                "detection reported {reference} times by the reference and {debar} by Debar at {path}: {signature}"
+            ),
         }
     }
 }

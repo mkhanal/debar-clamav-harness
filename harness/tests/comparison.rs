@@ -248,7 +248,7 @@ fn unmatched_content_of_another_type_is_reported_on_each_side() {
 }
 
 #[test]
-fn each_detection_one_side_reported_more_often_is_a_difference() {
+fn a_detection_both_sides_reported_a_different_number_of_times_is_one_count_difference() {
     let reference = zip_with(vec![detected(
         object(1, Some(0), 1, "CL_TYPE_TEXT_ASCII", 2),
         &[
@@ -264,9 +264,11 @@ fn each_detection_one_side_reported_more_often_is_a_difference() {
     assert_eq!(
         kinds(&reference, &debar),
         [
-            DifferenceKind::DetectionOnlyInReference {
+            DifferenceKind::DetectionCountDiffers {
                 path: path(&[2]),
                 signature: "Eicar-Test-Signature".to_owned(),
+                reference: 2,
+                debar: 1,
             },
             DifferenceKind::DetectionOnlyInDebar {
                 path: path(&[2]),
@@ -274,6 +276,20 @@ fn each_detection_one_side_reported_more_often_is_a_difference() {
             },
         ]
     );
+}
+
+#[test]
+fn a_detection_one_side_never_reported_is_a_difference_once_per_report() {
+    let reference = zip_with(vec![detected(
+        object(1, Some(0), 1, "CL_TYPE_TEXT_ASCII", 2),
+        &["Eicar-Test-Signature", "Eicar-Test-Signature"],
+    )]);
+    let debar = zip_with(vec![object(1, Some(0), 1, "CL_TYPE_TEXT_ASCII", 2)]);
+    let missed = DifferenceKind::DetectionOnlyInReference {
+        path: path(&[2]),
+        signature: "Eicar-Test-Signature".to_owned(),
+    };
+    assert_eq!(kinds(&reference, &debar), [missed.clone(), missed]);
 }
 
 #[test]

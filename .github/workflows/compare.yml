@@ -34,6 +34,26 @@ on:
         required: false
         type: string
         default: ""
+      built-target:
+        description: >-
+          When set, scan the inputs the input builder makes from every buildable extended
+          signature of this target type, and the boundary inputs below, instead of the
+          fixtures, and count how many each scanner detected under the signature it was built for.
+        required: false
+        type: string
+        default: ""
+      boundary-sample:
+        description: >-
+          With built-target, how many of its signatures placed anywhere also get three inputs
+          that put the built bytes across the file's first 128 KiB boundary.
+        required: false
+        type: string
+        default: "2000"
+      known-differences:
+        description: The known differences to judge by, a path in the harness repository.
+        required: false
+        type: string
+        default: known-differences.jsonl
 
 permissions: {}
 
@@ -68,15 +88,29 @@ jobs:
         env:
           BUILD_COMMAND: ${{ inputs.build-command }}
       - name: Build the fixtures
-        if: inputs.inputs-directory == ''
+        if: inputs.inputs-directory == '' && inputs.built-target == ''
         run: harness/fixtures/build fixtures
+      - name: Build inputs from the signatures
+        if: inputs.built-target != ''
+        run: harness/builder/build-inputs.sh built
+        env:
+          EXTENDED_SAMPLE: "1000000"
+          LOGICAL_SAMPLE: "0"
+          SAMPLE_TARGET: ${{ inputs.built-target }}
+          BOUNDARY_SAMPLE: ${{ inputs.boundary-sample }}
       - name: Compare Debar with the reference scanner
         run: |
-          harness/run-harness run \
-            --input "${INPUTS_DIRECTORY:-fixtures}" \
+          if [ -n "$BUILT_TARGET" ]; then
+            set -- --input built/sample/inputs --manifest built/sample/manifest.tsv
+          else
+            set -- --input "${INPUTS_DIRECTORY:-fixtures}"
+          fi
+          harness/run-harness run "$@" \
             --debar-command "$DEBAR_COMMAND" \
-            --known-differences harness/known-differences.jsonl \
+            --known-differences "harness/$KNOWN_DIFFERENCES" \
             --work-directory "$GITHUB_WORKSPACE/harness-work"
         env:
           INPUTS_DIRECTORY: ${{ inputs.inputs-directory }}
+          BUILT_TARGET: ${{ inputs.built-target }}
+          KNOWN_DIFFERENCES: ${{ inputs.known-differences }}
           DEBAR_COMMAND: ${{ inputs.debar-command }}
