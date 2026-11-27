@@ -1,7 +1,5 @@
 {"input":"275a021bbfb6489e54d471899f7db9d1663fc695ec2fe2a2c4538aabf651fd0f","kind":"detection_only_in_reference","path":[],"signature":"Eicar-Signature"}
-{"input":"fe27bd4cb6a15a16544f782eadcef99b4954d7f7f6d53c45092242226812091a","kind":"verdict_differs","reference":"strong_indicator","debar":"nothing_found"}
-{"input":"fe27bd4cb6a15a16544f782eadcef99b4954d7f7f6d53c45092242226812091a","kind":"object_only_in_reference","path":["275a021bbfb6489e54d471899f7db9d1663fc695ec2fe2a2c4538aabf651fd0f"],"type":"CL_TYPE_TEXT_ASCII","detections":["Eicar-Test-Signature","Eicar-Test-Signature","Eicar-Signature"]}
-{"input":"fe27bd4cb6a15a16544f782eadcef99b4954d7f7f6d53c45092242226812091a","kind":"object_only_in_reference","path":["b916d2c7fe7dc973407661da894c6e1859abd7652a4601230ebf4b549e1f0e1f"],"type":"CL_TYPE_TEXT_ASCII","detections":[]}
+{"input":"fe27bd4cb6a15a16544f782eadcef99b4954d7f7f6d53c45092242226812091a","kind":"detection_only_in_reference","path":["275a021bbfb6489e54d471899f7db9d1663fc695ec2fe2a2c4538aabf651fd0f"],"signature":"Eicar-Signature","gap":"Signature programs are not run (Debar piece 7): Eicar-Signature is reported by a bytecode program, on the zip's member as on the test file itself"}
 {"input":"1130a3b84f0b8909998c27fdfa40ef18fe620f426990a2dc48fc21bfe906c1eb","kind":"detection_only_in_reference","path":[],"signature":"Win.Trojan.FormatC-95"}
 {"input":"75959667e8b3fdf89fd73a9a408f766df2150af01bf1f95285984382cc048a0a","kind":"detection_only_in_reference","path":[],"signature":"Win.Trojan.FormatC-95"}
 {"input":"a9a0d684bd479a7eaf40219cf612654fd8f684878d44f7fbec84d281ef88f291","kind":"detection_only_in_reference","path":[],"signature":"Win.Trojan.FormatC-95"}

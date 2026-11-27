@@ -1,2 +1,1 @@
-{"input":"fe27bd4cb6a15a16544f782eadcef99b4954d7f7f6d53c45092242226812091a","kind":"verdict_differs","reference":"strong_indicator","debar":"nothing_found","gap":"Archive modules are not built (Debar piece 6): the zip is not opened"}
-{"input":"fe27bd4cb6a15a16544f782eadcef99b4954d7f7f6d53c45092242226812091a","kind":"object_only_in_reference","path":["275a021bbfb6489e54d471899f7db9d1663fc695ec2fe2a2c4538aabf651fd0f"],"type":"CL_TYPE_TEXT_ASCII","detections":["Eicar-Test-Signature"],"gap":"Archive modules are not built (Debar piece 6): the zip is not opened"}
+
