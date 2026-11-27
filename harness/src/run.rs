@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use harness_report::{Report, ReportError, Sha256};
 
-use crate::comparison::{DifferentInputs, compare};
+use crate::comparison::{DifferentInputs, compare, compare_first_match, every_detection};
 use crate::debar_command::{DebarCommand, DebarCommandError};
 use crate::difference::Difference;
 use crate::inputs::{Inputs, InputsError};
@@ -72,6 +72,7 @@ pub enum RunError {
 struct WorkDirectory {
     databases: PathBuf,
     reference: PathBuf,
+    reference_every_match: PathBuf,
     debar: PathBuf,
 }
 
@@ -90,6 +91,15 @@ pub fn run(settings: &RunSettings) -> Result<Outcome, RunError> {
         .observer
         .observe(&inputs, &work.reference, settings.matching)
         .map_err(RunError::Observer)?;
+    let reference_every_match_reports = match settings.matching {
+        Matching::EveryMatch => None,
+        Matching::FirstMatch => Some(
+            settings
+                .observer
+                .observe(&inputs, &work.reference_every_match, Matching::EveryMatch)
+                .map_err(RunError::Observer)?,
+        ),
+    };
     let mut compared = Vec::new();
     for ((index, relative), reference_report) in inputs
         .relative_paths()
@@ -97,6 +107,9 @@ pub fn run(settings: &RunSettings) -> Result<Outcome, RunError> {
         .enumerate()
         .zip(&reference_reports)
     {
+        let reference_every_match = reference_every_match_reports
+            .as_ref()
+            .and_then(|reports| reports.get(index));
         let debar_report = work.debar.join(format!("{index}.jsonl"));
         settings
             .debar_command
@@ -110,6 +123,7 @@ pub fn run(settings: &RunSettings) -> Result<Outcome, RunError> {
         compared.push(compare_reports(
             relative.display().to_string(),
             reference_report,
+            reference_every_match.map(PathBuf::as_path),
             &debar_report,
         )?);
     }
@@ -172,21 +186,19 @@ pub fn summarise_built_inputs(
     summary
 }
 
-fn every_detection(report: &Report) -> BTreeSet<String> {
-    report
-        .objects()
-        .flat_map(|object| object.detections.iter().cloned())
-        .collect()
-}
-
 pub fn compare_reports(
     name: String,
     reference: &Path,
+    reference_every_match: Option<&Path>,
     debar: &Path,
 ) -> Result<ComparedInput, RunError> {
     let reference = read_report(reference)?;
     let debar = read_report(debar)?;
-    let differences = compare(&reference, &debar).map_err(|error| RunError::DifferentInputs {
+    let compared = match reference_every_match {
+        None => compare(&reference, &debar),
+        Some(path) => compare_first_match(&reference, &read_report(path)?, &debar),
+    };
+    let differences = compared.map_err(|error| RunError::DifferentInputs {
         name: name.clone(),
         error,
     })?;
@@ -227,9 +239,15 @@ impl WorkDirectory {
         let work = Self {
             databases: root.join("databases"),
             reference: root.join("reference"),
+            reference_every_match: root.join("reference-every-match"),
             debar: root.join("debar"),
         };
-        for directory in [&work.databases, &work.reference, &work.debar] {
+        for directory in [
+            &work.databases,
+            &work.reference,
+            &work.reference_every_match,
+            &work.debar,
+        ] {
             let unusable = |error| RunError::WorkDirectory {
                 path: directory.clone(),
                 error,

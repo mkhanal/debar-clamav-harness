@@ -2,7 +2,6 @@
 {"input":"275a021bbfb6489e54d471899f7db9d1663fc695ec2fe2a2c4538aabf651fd0f","kind":"verdict_differs","reference":"strong_indicator","debar":"nothing_found"}
 {"input":"275a021bbfb6489e54d471899f7db9d1663fc695ec2fe2a2c4538aabf651fd0f","kind":"type_differs","path":[],"reference":"CL_TYPE_TEXT_ASCII","debar":null}
 {"input":"275a021bbfb6489e54d471899f7db9d1663fc695ec2fe2a2c4538aabf651fd0f","kind":"detection_only_in_reference","path":[],"signature":"Eicar-Test-Signature"}
-{"input":"275a021bbfb6489e54d471899f7db9d1663fc695ec2fe2a2c4538aabf651fd0f","kind":"detection_only_in_reference","path":[],"signature":"Eicar-Test-Signature"}
 {"input":"275a021bbfb6489e54d471899f7db9d1663fc695ec2fe2a2c4538aabf651fd0f","kind":"detection_only_in_reference","path":[],"signature":"Eicar-Signature"}
 {"input":"fe27bd4cb6a15a16544f782eadcef99b4954d7f7f6d53c45092242226812091a","kind":"verdict_differs","reference":"strong_indicator","debar":"nothing_found"}
 {"input":"fe27bd4cb6a15a16544f782eadcef99b4954d7f7f6d53c45092242226812091a","kind":"type_differs","path":[],"reference":"CL_TYPE_ZIP","debar":null}

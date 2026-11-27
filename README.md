@@ -48,18 +48,19 @@ harness run --input FILE_OR_DIRECTORY --debar-command COMMAND
 
 1. Every regular file under the input is an input, in name order.
 2. The databases are copied out of the observer image, so both scanners load the same files.
-3. The observer scans every input in one container, with no network. With `--matching first` it scans without all-match, so each scan stops at its first strong detection; the default, `every`, scans with all-match.
+3. The observer scans every input in one container, with no network. With `--matching first` it scans without all-match, so each scan stops at its first strong detection, and then scans every input again with all-match, to know every name the reference reports for it; the default, `every`, scans with all-match only.
 4. `COMMAND` runs under `sh -c` once per input, with `HARNESS_INPUT` (the file to scan), `HARNESS_REPORT` (where to write its report), `HARNESS_DATABASES` (the directory of databases) and `HARNESS_MATCHING` (`every` or `first`, as given to the observer) set. It must write a report in the schema below and exit 0; any other exit stops the run.
-5. Each pair of reports is compared, and the differences are judged against the known differences.
+5. Each pair of reports is compared, as [below](#matching-objects-and-naming-differences), and the differences are judged against the known differences.
 6. With `--manifest`, the builder's `manifest.tsv` for the inputs, the run also counts how many inputs each scanner detected under the signature the input was built for.
 
 ### `harness compare`
 
 ```text
 harness compare --reference REPORT --debar REPORT [--known-differences FILE]
+                [--reference-every-match REPORT]
 ```
 
-Compares two reports already written.
+Compares two reports already written. With `--reference-every-match`, the reference's report of the same input with all-match, the two reports are judged as made without all-match.
 
 Both commands print the new differences, the known ones and the known ones that no longer occur, each with the line that names it in the known differences. They exit 0 when every difference is known, 1 when a new difference was found, and 2 when the comparison could not be made.
 
@@ -118,8 +119,11 @@ The order in which either side reached its children never matters, only their co
 | `depth_differs` | A paired object was reached at another depth |
 | `size_differs` | A paired object's length differs |
 | `hash_differs` | A paired object's content differs at the same length |
-| `detection_only_in_reference`, `detection_only_in_debar` | A signature one side reported on a paired object and the other never did, once per report |
-| `detection_count_differs` | A signature both sides reported on a paired object, a different number of times, with both counts |
+| `detection_only_in_reference`, `detection_only_in_debar` | With all-match: a signature one side reported on a paired object and the other never did |
+| `detection_not_reported_by_reference` | Without all-match: a signature Debar reported that the reference does not report anywhere in the input with all-match |
+| `detection_of_another_class` | Without all-match: a signature Debar reported whose class (potentially unwanted, a name starting `PUA.`, `Heuristics.` or `BC.Heuristics.`, or strong, any other) is not the class of any name the reference reported without all-match |
+
+**Detections are compared as Debar's parity defines them**: the verdict, and the detections as a set. With all-match, each paired object's detections are compared as a set of names: the order they were reported in and how often one repeats are not compared. Without all-match, each scanner stops at its first strong detection, and which of several genuine names comes first is not compared: Debar's detections may be any the reference reports for the input with all-match, on any object, of a class the reference reported without it. The verdict and every object fact are compared as with all-match.
 
 ## The ratchet
 

@@ -65,11 +65,11 @@ pub enum DifferenceKind {
         path: ObjectPath,
         signature: String,
     },
-    DetectionCountDiffers {
-        path: ObjectPath,
+    DetectionNotReportedByReference {
         signature: String,
-        reference: u32,
-        debar: u32,
+    },
+    DetectionOfAnotherClass {
+        signature: String,
     },
 }
 
@@ -181,14 +181,13 @@ impl fmt::Display for DifferenceKind {
             Self::DetectionOnlyInDebar { path, signature } => {
                 write!(formatter, "detection only in Debar at {path}: {signature}")
             }
-            Self::DetectionCountDiffers {
-                path,
-                signature,
-                reference,
-                debar,
-            } => write!(
+            Self::DetectionNotReportedByReference { signature } => write!(
                 formatter,
-                "detection reported {reference} times by the reference and {debar} by Debar at {path}: {signature}"
+                "Debar's detection is not one the reference reports for the input with every match: {signature}"
+            ),
+            Self::DetectionOfAnotherClass { signature } => write!(
+                formatter,
+                "Debar's detection is of another class than the reference's: {signature}"
             ),
         }
     }

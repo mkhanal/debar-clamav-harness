@@ -13,6 +13,7 @@ use harness::run::{RunSettings, compare_reports, judge, run};
 
 const USAGE: &str = "usage:
   harness compare --reference REPORT --debar REPORT [--known-differences FILE]
+                  [--reference-every-match REPORT]
   harness run --input FILE_OR_DIRECTORY --debar-command COMMAND
               [--known-differences FILE] [--observer-image IMAGE] [--work-directory DIRECTORY]
               [--manifest FILE] [--matching every|first]
@@ -21,7 +22,11 @@ harness run scans every file of the input with the reference observer and with C
 which runs under sh -c with HARNESS_INPUT, HARNESS_REPORT, HARNESS_DATABASES and
 HARNESS_MATCHING set, and must write the report of HARNESS_INPUT to HARNESS_REPORT.
 With --matching first the reference scans without all-match, so each scan stops at its
-first strong detection; the default, every, scans with it. With --manifest, the builder's
+first strong detection, and scans again with it: Debar's detection must be one the
+reference reports for the input with all-match, of a class the reference reported without
+it. The default, every, scans with all-match only, and compares each object's detections as
+a set. harness compare judges a report made without all-match that way when
+--reference-every-match names the reference's report of the same input with all-match. With --manifest, the builder's
 manifest of the inputs, it also counts how many inputs each scanner detected under the
 signature the input was built for.
 
@@ -35,6 +40,7 @@ const DEFAULT_WORK_DIRECTORY_NAME: &str = "debar-clamav-harness";
 enum Task {
     Compare {
         reference: PathBuf,
+        reference_every_match: Option<PathBuf>,
         debar: PathBuf,
         known_differences: Option<PathBuf>,
     },
@@ -64,12 +70,18 @@ fn perform(task: Task) -> Result<bool, String> {
     let outcome = match task {
         Task::Compare {
             reference,
+            reference_every_match,
             debar,
             known_differences,
         } => {
             let known = read_known_differences(known_differences.as_deref())?;
-            let compared = compare_reports(debar.display().to_string(), &reference, &debar)
-                .map_err(|error| error.to_string())?;
+            let compared = compare_reports(
+                debar.display().to_string(),
+                &reference,
+                reference_every_match.as_deref(),
+                &debar,
+            )
+            .map_err(|error| error.to_string())?;
             judge(&known, vec![compared])
         }
         Task::Run {
@@ -122,6 +134,7 @@ fn parse_task(arguments: Vec<OsString>) -> Result<Task, String> {
     match task.as_ref().and_then(|task| task.to_str()) {
         Some("compare") => Ok(Task::Compare {
             reference: required("--reference", options.reference.clone())?.into(),
+            reference_every_match: options.reference_every_match.map(PathBuf::from),
             debar: required("--debar", options.debar.clone())?.into(),
             known_differences: options.known_differences.map(PathBuf::from),
         }),
@@ -152,6 +165,7 @@ fn parse_task(arguments: Vec<OsString>) -> Result<Task, String> {
 #[derive(Default)]
 struct Options {
     reference: Option<OsString>,
+    reference_every_match: Option<OsString>,
     debar: Option<OsString>,
     input: Option<OsString>,
     debar_command: Option<OsString>,
@@ -166,6 +180,7 @@ impl Options {
     fn set(&mut self, flag: &OsString, value: OsString) -> Result<(), String> {
         let slot = match flag.to_str() {
             Some("--reference") => &mut self.reference,
+            Some("--reference-every-match") => &mut self.reference_every_match,
             Some("--debar") => &mut self.debar,
             Some("--input") => &mut self.input,
             Some("--debar-command") => &mut self.debar_command,

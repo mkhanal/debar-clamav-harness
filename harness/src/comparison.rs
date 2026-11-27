@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use harness_report::{Object, ObjectId, Report, Sha256};
@@ -24,16 +24,93 @@ impl fmt::Display for DifferentInputs {
 impl std::error::Error for DifferentInputs {}
 
 pub fn compare(reference: &Report, debar: &Report) -> Result<Vec<Difference>, DifferentInputs> {
+    compare_with(reference, debar, Detections::PerObjectSets)
+}
+
+pub fn compare_first_match(
+    reference: &Report,
+    reference_every_match: &Report,
+    debar: &Report,
+) -> Result<Vec<Difference>, DifferentInputs> {
+    same_input(reference, reference_every_match)?;
+    let mut differences = compare_with(reference, debar, Detections::FirstMatchName)?;
     let input = reference.top_level().sha256;
-    if debar.top_level().sha256 != input {
-        return Err(DifferentInputs {
-            reference: input,
-            debar: debar.top_level().sha256,
-        });
+    let allowed = every_detection(reference_every_match);
+    let reference_classes: BTreeSet<DetectionClass> = every_detection(reference)
+        .iter()
+        .map(|signature| DetectionClass::of(signature))
+        .collect();
+    for signature in every_detection(debar) {
+        let kind = if !allowed.contains(&signature) {
+            DifferenceKind::DetectionNotReportedByReference { signature }
+        } else if !reference_classes.contains(&DetectionClass::of(&signature)) {
+            DifferenceKind::DetectionOfAnotherClass { signature }
+        } else {
+            continue;
+        };
+        differences.push(Difference { input, kind });
     }
+    Ok(differences)
+}
+
+#[derive(Clone, Copy)]
+enum Detections {
+    PerObjectSets,
+    FirstMatchName,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum DetectionClass {
+    Strong,
+    PotentiallyUnwanted,
+}
+
+const POTENTIALLY_UNWANTED_PREFIXES: [&str; 3] = ["PUA.", "Heuristics.", "BC.Heuristics."];
+
+impl DetectionClass {
+    fn of(signature: &str) -> Self {
+        if POTENTIALLY_UNWANTED_PREFIXES
+            .iter()
+            .any(|prefix| signature.starts_with(prefix))
+        {
+            Self::PotentiallyUnwanted
+        } else {
+            Self::Strong
+        }
+    }
+}
+
+#[must_use]
+pub fn every_detection(report: &Report) -> BTreeSet<String> {
+    report
+        .objects()
+        .flat_map(|object| object.detections.iter().cloned())
+        .collect()
+}
+
+fn same_input(reference: &Report, other: &Report) -> Result<(), DifferentInputs> {
+    let input = reference.top_level().sha256;
+    if other.top_level().sha256 == input {
+        Ok(())
+    } else {
+        Err(DifferentInputs {
+            reference: input,
+            debar: other.top_level().sha256,
+        })
+    }
+}
+
+fn compare_with(
+    reference: &Report,
+    debar: &Report,
+    detections: Detections,
+) -> Result<Vec<Difference>, DifferentInputs> {
+    same_input(reference, debar)?;
+    let input = reference.top_level().sha256;
     let mut comparison = Comparison {
         reference: children_by_parent(reference),
         debar: children_by_parent(debar),
+        detections,
         kinds: Vec::new(),
     };
     if reference.scanner().databases != debar.scanner().databases {
@@ -75,6 +152,7 @@ fn children_by_parent(report: &Report) -> ChildrenByParent<'_> {
 struct Comparison<'report> {
     reference: ChildrenByParent<'report>,
     debar: ChildrenByParent<'report>,
+    detections: Detections,
     kinds: Vec<DifferenceKind>,
 }
 
@@ -86,7 +164,12 @@ enum Side {
 impl Comparison<'_> {
     fn compare_paired(&mut self, path: &ObjectPath, reference: &Object, debar: &Object) {
         self.compare_facts(path, reference, debar);
-        self.compare_detections(path, &reference.detections, &debar.detections);
+        match self.detections {
+            Detections::PerObjectSets => {
+                self.compare_detections(path, &reference.detections, &debar.detections);
+            }
+            Detections::FirstMatchName => {}
+        }
         self.compare_children(path, reference.id, debar.id);
     }
 
@@ -121,45 +204,19 @@ impl Comparison<'_> {
     }
 
     fn compare_detections(&mut self, path: &ObjectPath, reference: &[String], debar: &[String]) {
-        let times = |reports: &[String], signature: &String| {
-            u32::try_from(reports.iter().filter(|report| *report == signature).count())
-                .unwrap_or(u32::MAX)
-        };
-        let mut seen: Vec<&String> = Vec::new();
-        for signature in reference.iter().chain(debar) {
-            if seen.contains(&signature) {
-                continue;
-            }
-            seen.push(signature);
-            let in_reference = times(reference, signature);
-            let in_debar = times(debar, signature);
-            match (in_reference, in_debar) {
-                (_, 0) => {
-                    for _ in 0..in_reference {
-                        self.kinds.push(DifferenceKind::DetectionOnlyInReference {
-                            path: path.clone(),
-                            signature: signature.clone(),
-                        });
-                    }
-                }
-                (0, _) => {
-                    for _ in 0..in_debar {
-                        self.kinds.push(DifferenceKind::DetectionOnlyInDebar {
-                            path: path.clone(),
-                            signature: signature.clone(),
-                        });
-                    }
-                }
-                (reference_count, debar_count) if reference_count != debar_count => {
-                    self.kinds.push(DifferenceKind::DetectionCountDiffers {
-                        path: path.clone(),
-                        signature: signature.clone(),
-                        reference: reference_count,
-                        debar: debar_count,
-                    });
-                }
-                _ => {}
-            }
+        let reference: BTreeSet<&String> = reference.iter().collect();
+        let debar: BTreeSet<&String> = debar.iter().collect();
+        for signature in reference.difference(&debar) {
+            self.kinds.push(DifferenceKind::DetectionOnlyInReference {
+                path: path.clone(),
+                signature: (*signature).clone(),
+            });
+        }
+        for signature in debar.difference(&reference) {
+            self.kinds.push(DifferenceKind::DetectionOnlyInDebar {
+                path: path.clone(),
+                signature: (*signature).clone(),
+            });
         }
     }
 

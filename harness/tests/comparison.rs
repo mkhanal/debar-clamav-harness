@@ -1,6 +1,6 @@
 #![allow(clippy::unwrap_used)]
 
-use harness::comparison::{DifferentInputs, compare};
+use harness::comparison::{DifferentInputs, compare, compare_first_match};
 use harness::difference::{Difference, DifferenceKind, ObjectPath};
 use harness_report::{DatabaseVersion, Object, ObjectId, Report, Scanner, Sha256, Verdict};
 
@@ -248,7 +248,7 @@ fn unmatched_content_of_another_type_is_reported_on_each_side() {
 }
 
 #[test]
-fn a_detection_both_sides_reported_a_different_number_of_times_is_one_count_difference() {
+fn detections_are_compared_as_sets_whatever_their_order_and_repeats() {
     let reference = zip_with(vec![detected(
         object(1, Some(0), 1, "CL_TYPE_TEXT_ASCII", 2),
         &[
@@ -263,33 +263,146 @@ fn a_detection_both_sides_reported_a_different_number_of_times_is_one_count_diff
     )]);
     assert_eq!(
         kinds(&reference, &debar),
-        [
-            DifferenceKind::DetectionCountDiffers {
-                path: path(&[2]),
-                signature: "Eicar-Test-Signature".to_owned(),
-                reference: 2,
-                debar: 1,
-            },
-            DifferenceKind::DetectionOnlyInDebar {
-                path: path(&[2]),
-                signature: "Debar.Only".to_owned(),
-            },
-        ]
+        [DifferenceKind::DetectionOnlyInDebar {
+            path: path(&[2]),
+            signature: "Debar.Only".to_owned(),
+        }]
     );
 }
 
 #[test]
-fn a_detection_one_side_never_reported_is_a_difference_once_per_report() {
+fn a_detection_one_side_never_reported_is_one_difference_however_often_the_other_reported_it() {
     let reference = zip_with(vec![detected(
         object(1, Some(0), 1, "CL_TYPE_TEXT_ASCII", 2),
         &["Eicar-Test-Signature", "Eicar-Test-Signature"],
     )]);
     let debar = zip_with(vec![object(1, Some(0), 1, "CL_TYPE_TEXT_ASCII", 2)]);
-    let missed = DifferenceKind::DetectionOnlyInReference {
-        path: path(&[2]),
-        signature: "Eicar-Test-Signature".to_owned(),
-    };
-    assert_eq!(kinds(&reference, &debar), [missed.clone(), missed]);
+    assert_eq!(
+        kinds(&reference, &debar),
+        [DifferenceKind::DetectionOnlyInReference {
+            path: path(&[2]),
+            signature: "Eicar-Test-Signature".to_owned(),
+        }]
+    );
+}
+
+fn first_match_kinds(
+    reference: &Report,
+    reference_every_match: &Report,
+    debar: &Report,
+) -> Vec<DifferenceKind> {
+    compare_first_match(reference, reference_every_match, debar)
+        .unwrap()
+        .into_iter()
+        .map(|difference| difference.kind)
+        .collect()
+}
+
+fn top_level_detecting(verdict: Verdict, names: &[&str]) -> Report {
+    report(
+        verdict,
+        vec![detected(object(0, None, 0, "CL_TYPE_ZIP", 1), names)],
+    )
+}
+
+#[test]
+fn without_every_match_any_name_the_reference_reports_with_every_match_is_the_same_result() {
+    let reference = top_level_detecting(Verdict::StrongIndicator, &["Win.Trojan.Mini-50"]);
+    let reference_every_match = top_level_detecting(
+        Verdict::StrongIndicator,
+        &["Win.Trojan.Mini-50", "Win.Trojan.Trivial-471"],
+    );
+    let debar = top_level_detecting(Verdict::StrongIndicator, &["Win.Trojan.Trivial-471"]);
+    assert_eq!(
+        first_match_kinds(&reference, &reference_every_match, &debar),
+        []
+    );
+}
+
+#[test]
+fn without_every_match_the_name_may_come_from_another_object_than_the_reference_names() {
+    let reference = zip_with(vec![detected(
+        object(1, Some(0), 1, "CL_TYPE_TEXT_ASCII", 2),
+        &["Inner"],
+    )]);
+    let reference_every_match = report(
+        Verdict::NothingFound,
+        vec![
+            detected(object(0, None, 0, "CL_TYPE_ZIP", 1), &["Outer"]),
+            detected(object(1, Some(0), 1, "CL_TYPE_TEXT_ASCII", 2), &["Inner"]),
+        ],
+    );
+    let debar = report(
+        Verdict::NothingFound,
+        vec![
+            detected(object(0, None, 0, "CL_TYPE_ZIP", 1), &["Outer"]),
+            object(1, Some(0), 1, "CL_TYPE_TEXT_ASCII", 2),
+        ],
+    );
+    assert_eq!(
+        first_match_kinds(&reference, &reference_every_match, &debar),
+        []
+    );
+}
+
+#[test]
+fn without_every_match_a_name_the_reference_never_reports_for_the_input_is_a_difference() {
+    let reference = top_level_detecting(Verdict::StrongIndicator, &["Win.Trojan.Mini-50"]);
+    let debar = top_level_detecting(Verdict::StrongIndicator, &["Win.Trojan.Other-1"]);
+    assert_eq!(
+        first_match_kinds(&reference, &reference, &debar),
+        [DifferenceKind::DetectionNotReportedByReference {
+            signature: "Win.Trojan.Other-1".to_owned(),
+        }]
+    );
+}
+
+#[test]
+fn without_every_match_a_name_of_another_class_than_the_reference_reports_is_a_difference() {
+    let reference = top_level_detecting(Verdict::StrongIndicator, &["Win.Trojan.Mini-50"]);
+    let reference_every_match = top_level_detecting(
+        Verdict::StrongIndicator,
+        &["Win.Trojan.Mini-50", "PUA.Win.Tool.Packed-1"],
+    );
+    let debar = top_level_detecting(Verdict::StrongIndicator, &["PUA.Win.Tool.Packed-1"]);
+    assert_eq!(
+        first_match_kinds(&reference, &reference_every_match, &debar),
+        [DifferenceKind::DetectionOfAnotherClass {
+            signature: "PUA.Win.Tool.Packed-1".to_owned(),
+        }]
+    );
+}
+
+#[test]
+fn without_every_match_a_different_verdict_is_still_a_difference() {
+    let reference = top_level_detecting(Verdict::StrongIndicator, &["Win.Trojan.Mini-50"]);
+    let debar = report(
+        Verdict::NothingFound,
+        vec![object(0, None, 0, "CL_TYPE_ZIP", 1)],
+    );
+    assert_eq!(
+        first_match_kinds(&reference, &reference, &debar),
+        [DifferenceKind::VerdictDiffers {
+            reference: Verdict::StrongIndicator,
+            debar: Verdict::NothingFound,
+        }]
+    );
+}
+
+#[test]
+fn without_every_match_reports_of_another_input_cannot_be_the_allowed_names() {
+    let reference = zip_with(vec![]);
+    let other = report(
+        Verdict::NothingFound,
+        vec![object(0, None, 0, "CL_TYPE_ZIP", 9)],
+    );
+    assert_eq!(
+        compare_first_match(&reference, &other, &reference),
+        Err(DifferentInputs {
+            reference: sha(1),
+            debar: sha(9),
+        })
+    );
 }
 
 #[test]
