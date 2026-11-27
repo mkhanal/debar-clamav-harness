@@ -446,10 +446,10 @@ static void release_observation(struct scan_observation *observation)
 }
 
 static bool observe_one_input(struct cl_engine *engine, const char *input_path, const char *report_path,
-                              const struct database_versions *databases)
+                              const struct database_versions *databases, bool every_match)
 {
-    struct cl_scan_options clamscan_allmatch_defaults = {
-        .general   = CL_SCAN_GENERAL_ALLMATCHES | CL_SCAN_GENERAL_HEURISTICS,
+    struct cl_scan_options clamscan_defaults = {
+        .general   = (every_match ? CL_SCAN_GENERAL_ALLMATCHES : 0) | CL_SCAN_GENERAL_HEURISTICS,
         .parse     = CLAMSCAN_DEFAULT_PARSERS,
         .heuristic = 0,
         .mail      = 0,
@@ -468,9 +468,10 @@ static bool observe_one_input(struct cl_engine *engine, const char *input_path, 
         return false;
     }
     cl_error_t scan_result = cl_scandesc_ex(descriptor, input_path, &verdict, &last_alert, &bytes_scanned, engine,
-                                            &clamscan_allmatch_defaults, &observation, NULL, NULL, NULL, NULL,
+                                            &clamscan_defaults, &observation, NULL, NULL, NULL, NULL,
                                             &top_level_type);
-    if (scan_result != CL_SUCCESS) {
+    bool scanned = scan_result == CL_SUCCESS || (scan_result == CL_VIRUS && verdict != CL_VERDICT_NOTHING_FOUND);
+    if (!scanned) {
         fprintf(stderr, "clamav-observer: scanning %s failed: %s\n", input_path, cl_strerror(scan_result));
     } else if (observation.out_of_memory) {
         fprintf(stderr, "clamav-observer: ran out of memory recording %s\n", input_path);
@@ -558,7 +559,7 @@ static struct cl_engine *engine_with_official_databases(const char *database_dir
 
 static int usage(void)
 {
-    fputs("usage: clamav-observer [--databases DIRECTORY] INPUT REPORT [INPUT REPORT]...\n", stderr);
+    fputs("usage: clamav-observer [--databases DIRECTORY] [--first-match] INPUT REPORT [INPUT REPORT]...\n", stderr);
     return EXIT_OBSERVATION_FAILED;
 }
 
@@ -569,6 +570,11 @@ int main(int argument_count, char **arguments)
     if (argument_count > 2 && strcmp(arguments[1], "--databases") == 0) {
         database_directory = arguments[2];
         first_pair         = 3;
+    }
+    bool every_match = true;
+    if (argument_count > first_pair && strcmp(arguments[first_pair], "--first-match") == 0) {
+        every_match = false;
+        first_pair++;
     }
     int remaining = argument_count - first_pair;
     if (remaining < 2 || remaining % 2 != 0) {
@@ -591,7 +597,7 @@ int main(int argument_count, char **arguments)
 
     bool every_input_observed = true;
     for (int index = first_pair; index + 1 < argument_count; index += 2) {
-        every_input_observed = observe_one_input(engine, arguments[index], arguments[index + 1], &databases) &&
+        every_input_observed = observe_one_input(engine, arguments[index], arguments[index + 1], &databases, every_match) &&
                                every_input_observed;
     }
     cl_engine_free(engine);
