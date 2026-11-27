@@ -1,0 +1,1 @@
+{"input":"275a021bbfb6489e54d471899f7db9d1663fc695ec2fe2a2c4538aabf651fd0f","kind":"detection_only_in_reference","path":[],"signature":"Eicar-Signature","gap":"Signature programs are not run (Debar piece 7): Eicar-Signature is reported by a bytecode program, which raw-only scans still run"}
