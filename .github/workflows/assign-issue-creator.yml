@@ -1,0 +1,23 @@
+name: Assign the issue's creator
+
+on:
+  issues:
+    types: [opened]
+
+permissions: {}
+
+jobs:
+  assign:
+    name: assign the creator
+    if: github.event.issue.assignees[0] == null
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    permissions:
+      issues: write # assigns the person who opened the issue
+    steps:
+      - run: gh issue edit "$NUMBER" --repo "$REPOSITORY" --add-assignee "$CREATOR"
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NUMBER: ${{ github.event.issue.number }}
+          REPOSITORY: ${{ github.repository }}
+          CREATOR: ${{ github.event.issue.user.login }}
