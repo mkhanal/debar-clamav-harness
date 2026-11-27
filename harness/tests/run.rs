@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 
 use harness::debar_command::{DebarCommand, DebarCommandError};
 use harness::inputs::Inputs;
+use harness::matching::Matching;
 
 struct Scratch(PathBuf);
 
@@ -82,7 +83,9 @@ fn the_debar_command_is_told_its_input_report_and_databases_through_the_environm
             .to_owned(),
     );
 
-    command.run(&input, &databases, &report).unwrap();
+    command
+        .run(&input, &databases, &report, Matching::EveryMatch)
+        .unwrap();
 
     assert_eq!(
         fs::read_to_string(&report).unwrap(),
@@ -101,7 +104,32 @@ fn a_failing_debar_command_stops_the_run() {
     let input = scratch.file("input.txt", b"input");
     let command = DebarCommand::new("exit 3".to_owned());
 
-    let outcome = command.run(&input, Path::new("/databases"), &scratch.0.join("report"));
+    let outcome = command.run(
+        &input,
+        Path::new("/databases"),
+        &scratch.0.join("report"),
+        Matching::EveryMatch,
+    );
 
     assert!(matches!(outcome, Err(DebarCommandError::Failed { .. })));
+}
+
+#[test]
+fn the_debar_command_is_told_whether_the_reference_stopped_at_its_first_match() {
+    let scratch = Scratch::new("matching");
+    let input = scratch.file("input.txt", b"input");
+    let report = scratch.0.join("report.txt");
+    let command =
+        DebarCommand::new(r#"printf '%s' "$HARNESS_MATCHING" > "$HARNESS_REPORT""#.to_owned());
+
+    command
+        .run(
+            &input,
+            Path::new("/databases"),
+            &report,
+            Matching::FirstMatch,
+        )
+        .unwrap();
+
+    assert_eq!(fs::read_to_string(&report).unwrap(), "first");
 }

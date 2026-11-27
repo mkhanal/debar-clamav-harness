@@ -13,6 +13,7 @@ The comparison harness for [Debar](https://github.com/mkhanal/debar) and the Cla
 | `builder/` | The input builder: turns each pattern signature into a file it must match, and proves those files against the reference scanner |
 | `stand-in/` | `debar-stand-in`, which writes a valid report of the top-level object alone, to prove the Debar side until Debar can scan |
 | `known-differences.jsonl` | The ratchet for the stand-in: every difference already known |
+| `known-differences-first-match.jsonl` | The stand-in's ratchet when both scanners stop at their first strong detection |
 | `debar-known-differences.jsonl` | The ratchet for Debar, which Debar's CI judges its fixtures and its inputs built from extended and logical signatures of targets 0 and 4 by |
 | `debar-known-differences-web-pages.jsonl`, `debar-known-differences-text.jsonl` | Debar's ratchets for inputs built from extended and logical signatures of targets 3 and 7, whose detections come only from normalised content Debar does not build yet |
 | `fixtures/build` | Builds the small fixture files CI compares: the EICAR test file, a zip holding it beside a clean file, a clean text file and a file too small to scan |
@@ -41,13 +42,13 @@ fixtures/build target/fixtures
 ```text
 harness run --input FILE_OR_DIRECTORY --debar-command COMMAND
             [--known-differences FILE] [--observer-image IMAGE] [--work-directory DIRECTORY]
-            [--manifest FILE]
+            [--manifest FILE] [--matching every|first]
 ```
 
 1. Every regular file under the input is an input, in name order.
 2. The databases are copied out of the observer image, so both scanners load the same files.
-3. The observer scans every input in one container, with no network.
-4. `COMMAND` runs under `sh -c` once per input, with `HARNESS_INPUT` (the file to scan), `HARNESS_REPORT` (where to write its report) and `HARNESS_DATABASES` (the directory of databases) set. It must write a report in the schema below and exit 0; any other exit stops the run.
+3. The observer scans every input in one container, with no network. With `--matching first` it scans without all-match, so each scan stops at its first strong detection; the default, `every`, scans with all-match.
+4. `COMMAND` runs under `sh -c` once per input, with `HARNESS_INPUT` (the file to scan), `HARNESS_REPORT` (where to write its report), `HARNESS_DATABASES` (the directory of databases) and `HARNESS_MATCHING` (`every` or `first`, as given to the observer) set. It must write a report in the schema below and exit 0; any other exit stops the run.
 5. Each pair of reports is compared, and the differences are judged against the known differences.
 6. With `--manifest`, the builder's `manifest.tsv` for the inputs, the run also counts how many inputs each scanner detected under the signature the input was built for.
 
@@ -87,7 +88,7 @@ The `harness-report` crate reads a report into a type that can only hold a valid
 
 ## What the observer records
 
-The observer loads every database in the pinned image's `/var/lib/clamav` (`main`, `daily` and `bytecode`) as `clamscan` does by default, and scans each input with `clamscan`'s default options plus `--allmatch`: every parser on, heuristic alerts on, the library's default limits, the clean cache on. It registers three of libclamav's scan callbacks:
+The observer loads every database in the pinned image's `/var/lib/clamav` (`main`, `daily` and `bytecode`) as `clamscan` does by default, and scans each input with `clamscan`'s default options plus `--allmatch`, or with `--first-match` (the observer's option that `harness run --matching first` passes) without it: every parser on, heuristic alerts on, the library's default limits, the clean cache on. It registers three of libclamav's scan callbacks:
 
 - **`CL_SCAN_CALLBACK_FILE_TYPE`** records an object the first time it is typed: its id, its nearest recorded ancestor as parent, its depth, size and SHA-256. Each later call updates its type. This callback also fires for objects answered from the clean cache, which never reach the others.
 - **`CL_SCAN_CALLBACK_POST_SCAN`** records the type the object finally settled on.
@@ -184,7 +185,7 @@ jobs:
       debar-command: debar/target/release/debar <arguments that scan "$HARNESS_INPUT" with the databases in "$HARNESS_DATABASES" and write the report to "$HARNESS_REPORT">
 ```
 
-With `built-target: "0"` it scans, instead of the fixtures, an input built from every buildable extended signature of that target type plus `boundary-sample` (default 2,000) signatures across a 128 KiB boundary, and reports how many each scanner detected under the signature each input was built for. `extended-sample` (default every one) and `logical-sample` (default none) set how many extended and logical signatures of the target the inputs are built from; Debar's logical-signature jobs pass `extended-sample: "0"` and a `logical-sample` above the count. `known-differences` names the ratchet file to judge by (default `known-differences.jsonl`); Debar passes `debar-known-differences.jsonl`, or for targets 3 and 7 the ratchet named for that target's content.
+With `built-target: "0"` it scans, instead of the fixtures, an input built from every buildable extended signature of that target type plus `boundary-sample` (default 2,000) signatures across a 128 KiB boundary, and reports how many each scanner detected under the signature each input was built for. `extended-sample` (default every one) and `logical-sample` (default none) set how many extended and logical signatures of the target the inputs are built from; Debar's logical-signature jobs pass `extended-sample: "0"` and a `logical-sample` above the count. `matching: first` runs both scanners without all-match. `known-differences` names the ratchet file to judge by (default `known-differences.jsonl`); Debar passes `debar-known-differences.jsonl`, or for targets 3 and 7 the ratchet named for that target's content.
 
 It runs on amd64 and arm64. It checks out this repository at `harness-ref` into `harness/` and Debar (by default the calling repository at the triggering commit; `debar-repository` and `debar-ref` override them) into `debar/`, runs `build-command` inside `debar/`, builds the fixtures unless `inputs-directory` names others, and runs `harness/run-harness run` from the directory holding both checkouts with this repository's known differences. This repository's own CI calls the same workflow with the stand-in as Debar.
 

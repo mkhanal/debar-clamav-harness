@@ -3,6 +3,8 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus};
 
+use crate::matching::{MATCHING_VARIABLE, Matching};
+
 pub const INPUT_VARIABLE: &str = "HARNESS_INPUT";
 pub const REPORT_VARIABLE: &str = "HARNESS_REPORT";
 pub const DATABASES_VARIABLE: &str = "HARNESS_DATABASES";
@@ -29,6 +31,7 @@ impl DebarCommand {
         input: &Path,
         databases: &Path,
         report: &Path,
+        matching: Matching,
     ) -> Result<(), DebarCommandError> {
         let status = Command::new("sh")
             .arg("-c")
@@ -36,6 +39,7 @@ impl DebarCommand {
             .env(INPUT_VARIABLE, input)
             .env(DATABASES_VARIABLE, databases)
             .env(REPORT_VARIABLE, report)
+            .env(MATCHING_VARIABLE, matching.word())
             .status()
             .map_err(|error| DebarCommandError::NotStarted { error })?;
         if status.success() {

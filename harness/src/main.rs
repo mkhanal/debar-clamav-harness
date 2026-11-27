@@ -6,6 +6,7 @@ use std::process::ExitCode;
 
 use harness::console::print_outcome;
 use harness::debar_command::DebarCommand;
+use harness::matching::Matching;
 use harness::observer::Observer;
 use harness::ratchet::KnownDifferences;
 use harness::run::{RunSettings, compare_reports, judge, run};
@@ -14,11 +15,13 @@ const USAGE: &str = "usage:
   harness compare --reference REPORT --debar REPORT [--known-differences FILE]
   harness run --input FILE_OR_DIRECTORY --debar-command COMMAND
               [--known-differences FILE] [--observer-image IMAGE] [--work-directory DIRECTORY]
-              [--manifest FILE]
+              [--manifest FILE] [--matching every|first]
 
 harness run scans every file of the input with the reference observer and with COMMAND,
-which runs under sh -c with HARNESS_INPUT, HARNESS_REPORT and HARNESS_DATABASES set,
-and must write the report of HARNESS_INPUT to HARNESS_REPORT. With --manifest, the builder's
+which runs under sh -c with HARNESS_INPUT, HARNESS_REPORT, HARNESS_DATABASES and
+HARNESS_MATCHING set, and must write the report of HARNESS_INPUT to HARNESS_REPORT.
+With --matching first the reference scans without all-match, so each scan stops at its
+first strong detection; the default, every, scans with it. With --manifest, the builder's
 manifest of the inputs, it also counts how many inputs each scanner detected under the
 signature the input was built for.
 
@@ -42,6 +45,7 @@ enum Task {
         observer_image: Option<String>,
         work_directory: Option<PathBuf>,
         manifest: Option<PathBuf>,
+        matching: Matching,
     },
 }
 
@@ -75,12 +79,14 @@ fn perform(task: Task) -> Result<bool, String> {
             observer_image,
             work_directory,
             manifest,
+            matching,
         } => {
             let settings = RunSettings {
                 input,
                 debar_command: DebarCommand::new(debar_command),
                 observer: observer_image
                     .map_or_else(Observer::pinned, |image| Observer::new(&image)),
+                matching,
                 known_differences: read_known_differences(known_differences.as_deref())?,
                 work_directory: work_directory
                     .unwrap_or_else(|| std::env::temp_dir().join(DEFAULT_WORK_DIRECTORY_NAME)),
@@ -132,6 +138,12 @@ fn parse_task(arguments: Vec<OsString>) -> Result<Task, String> {
                 .map_err(|_| "--observer-image must be valid UTF-8".to_owned())?,
             work_directory: options.work_directory.map(PathBuf::from),
             manifest: options.manifest.map(PathBuf::from),
+            matching: options
+                .matching
+                .map_or(Some(Matching::EveryMatch), |word| {
+                    word.to_str().and_then(Matching::from_word)
+                })
+                .ok_or_else(|| format!("--matching must be every or first\n{USAGE}"))?,
         }),
         _ => Err(USAGE.to_owned()),
     }
@@ -147,6 +159,7 @@ struct Options {
     observer_image: Option<OsString>,
     work_directory: Option<OsString>,
     manifest: Option<OsString>,
+    matching: Option<OsString>,
 }
 
 impl Options {
@@ -160,6 +173,7 @@ impl Options {
             Some("--observer-image") => &mut self.observer_image,
             Some("--work-directory") => &mut self.work_directory,
             Some("--manifest") => &mut self.manifest,
+            Some("--matching") => &mut self.matching,
             _ => return Err(format!("unknown option {}\n{USAGE}", flag.display())),
         };
         *slot = Some(value);

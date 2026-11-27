@@ -10,6 +10,7 @@ use crate::comparison::{DifferentInputs, compare};
 use crate::debar_command::{DebarCommand, DebarCommandError};
 use crate::difference::Difference;
 use crate::inputs::{Inputs, InputsError};
+use crate::matching::Matching;
 use crate::observer::{Observer, ObserverError};
 use crate::ratchet::{Judgement, KnownDifferences};
 
@@ -17,6 +18,7 @@ pub struct RunSettings {
     pub input: PathBuf,
     pub debar_command: DebarCommand,
     pub observer: Observer,
+    pub matching: Matching,
     pub known_differences: KnownDifferences,
     pub work_directory: PathBuf,
     pub manifest: Option<PathBuf>,
@@ -86,7 +88,7 @@ pub fn run(settings: &RunSettings) -> Result<Outcome, RunError> {
         .map_err(RunError::Observer)?;
     let reference_reports = settings
         .observer
-        .observe(&inputs, &work.reference)
+        .observe(&inputs, &work.reference, settings.matching)
         .map_err(RunError::Observer)?;
     let mut compared = Vec::new();
     for ((index, relative), reference_report) in inputs
@@ -102,6 +104,7 @@ pub fn run(settings: &RunSettings) -> Result<Outcome, RunError> {
                 &inputs.root().join(relative),
                 &work.databases,
                 &debar_report,
+                settings.matching,
             )
             .map_err(RunError::DebarCommand)?;
         compared.push(compare_reports(

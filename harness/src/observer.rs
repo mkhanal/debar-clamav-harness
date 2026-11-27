@@ -5,12 +5,14 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 
 use crate::inputs::Inputs;
+use crate::matching::Matching;
 
 pub const PINNED_IMAGE: &str = include_str!("../../observer-image");
 const DATABASE_DIRECTORY_IN_IMAGE: &str = "/var/lib/clamav/.";
 const INPUT_MOUNT: &str = "/input";
 const REPORT_MOUNT: &str = "/reports";
 const INPUTS_PER_CONTAINER: usize = 2000;
+const FIRST_MATCH_OPTION: &str = "--first-match";
 
 #[derive(Debug)]
 pub struct Observer {
@@ -61,7 +63,12 @@ impl Observer {
         copied.and(removed).map(|_| ())
     }
 
-    pub fn observe(&self, inputs: &Inputs, reports: &Path) -> Result<Vec<PathBuf>, ObserverError> {
+    pub fn observe(
+        &self,
+        inputs: &Inputs,
+        reports: &Path,
+        matching: Matching,
+    ) -> Result<Vec<PathBuf>, ObserverError> {
         let owner = owner_of(reports)?;
         let input_volume = format!("{}:{INPUT_MOUNT}:ro", inputs.root().display());
         let report_volume = format!("{}:{REPORT_MOUNT}", reports.display());
@@ -91,6 +98,9 @@ impl Observer {
             .iter()
             .map(|argument| (*argument).to_owned())
             .collect();
+            if matching == Matching::FirstMatch {
+                arguments.push(FIRST_MATCH_OPTION.to_owned());
+            }
             for (input, report) in batch {
                 arguments.push(input.clone());
                 arguments.push(format!("{REPORT_MOUNT}/{report}"));

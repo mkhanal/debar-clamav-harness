@@ -60,6 +60,13 @@ on:
         required: false
         type: string
         default: "0"
+      matching:
+        description: >-
+          every to scan with all-match, or first to stop each scan at its first strong
+          detection, in the reference scanner as in HARNESS_MATCHING for the Debar command.
+        required: false
+        type: string
+        default: every
       known-differences:
         description: The known differences to judge by, a path in the harness repository.
         required: false
@@ -119,9 +126,11 @@ jobs:
           harness/run-harness run "$@" \
             --debar-command "$DEBAR_COMMAND" \
             --known-differences "harness/$KNOWN_DIFFERENCES" \
+            --matching "$MATCHING" \
             --work-directory "$GITHUB_WORKSPACE/harness-work"
         env:
           INPUTS_DIRECTORY: ${{ inputs.inputs-directory }}
           BUILT_TARGET: ${{ inputs.built-target }}
           KNOWN_DIFFERENCES: ${{ inputs.known-differences }}
+          MATCHING: ${{ inputs.matching }}
           DEBAR_COMMAND: ${{ inputs.debar-command }}

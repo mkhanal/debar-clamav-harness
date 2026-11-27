@@ -39,3 +39,17 @@ jobs:
       debar-ref: ${{ github.sha }}
       build-command: ./in-toolchain cargo build --release --locked --package debar-stand-in
       debar-command: debar/target/release/debar-stand-in --databases "$HARNESS_DATABASES" "$HARNESS_INPUT" "$HARNESS_REPORT"
+
+  compare-stand-in-first-match:
+    name: compare the stand-in without all-match
+    permissions:
+      contents: read
+    uses: $/.github/workflows/compare.yml
+    with:
+      harness-ref: ${{ github.sha }}
+      debar-repository: ${{ github.repository }}
+      debar-ref: ${{ github.sha }}
+      build-command: ./in-toolchain cargo build --release --locked --package debar-stand-in
+      debar-command: debar/target/release/debar-stand-in --databases "$HARNESS_DATABASES" "$HARNESS_INPUT" "$HARNESS_REPORT"
+      matching: first
+      known-differences: known-differences-first-match.jsonl
