@@ -15,6 +15,7 @@ The comparison harness for [Debar](https://github.com/mkhanal/debar) and the Cla
 | `known-differences.jsonl` | The ratchet for the stand-in: every difference already known |
 | `known-differences-first-match.jsonl` | The stand-in's ratchet when both scanners stop at their first strong detection |
 | `debar-known-differences.jsonl` | The ratchet for Debar, which Debar's CI judges its fixtures and its inputs built from extended and logical signatures of targets 0 and 4 by |
+| `debar-known-differences-first-match.jsonl` | Debar's ratchet when both scanners stop at their first strong detection, for its fixtures and its target-0 inputs |
 | `debar-known-differences-web-pages.jsonl`, `debar-known-differences-text.jsonl` | Debar's ratchets for inputs built from extended and logical signatures of targets 3 and 7, whose detections come only from normalised content Debar does not build yet |
 | `fixtures/build` | Builds the small fixture files CI compares: the EICAR test file, a zip holding it beside a clean file, a clean text file and a file too small to scan |
 | `builder/build-inputs.sh` | Unpacks the pinned databases and builds a sample of inputs with the builder |
