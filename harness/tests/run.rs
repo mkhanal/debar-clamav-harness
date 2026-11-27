@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use harness::debar_command::{DebarCommand, DebarCommandError};
 use harness::inputs::Inputs;
 use harness::matching::Matching;
+use harness::scan_options::{ScanOptions, ScanOptionsError};
 
 struct Scratch(PathBuf);
 
@@ -84,7 +85,13 @@ fn the_debar_command_is_told_its_input_report_and_databases_through_the_environm
     );
 
     command
-        .run(&input, &databases, &report, Matching::EveryMatch)
+        .run(
+            &input,
+            &databases,
+            &report,
+            Matching::EveryMatch,
+            &ScanOptions::default(),
+        )
         .unwrap();
 
     assert_eq!(
@@ -109,6 +116,7 @@ fn a_failing_debar_command_stops_the_run() {
         Path::new("/databases"),
         &scratch.0.join("report"),
         Matching::EveryMatch,
+        &ScanOptions::default(),
     );
 
     assert!(matches!(outcome, Err(DebarCommandError::Failed { .. })));
@@ -128,8 +136,62 @@ fn the_debar_command_is_told_whether_the_reference_stopped_at_its_first_match() 
             Path::new("/databases"),
             &report,
             Matching::FirstMatch,
+            &ScanOptions::default(),
         )
         .unwrap();
 
     assert_eq!(fs::read_to_string(&report).unwrap(), "first");
+}
+
+#[test]
+fn the_debar_command_is_told_the_scan_options_both_scanners_run_with() {
+    let scratch = Scratch::new("scan-options");
+    let input = scratch.file("input.txt", b"input");
+    let report = scratch.0.join("report.txt");
+    let command =
+        DebarCommand::new(r#"printf '%s' "$HARNESS_SCAN_OPTIONS" > "$HARNESS_REPORT""#.to_owned());
+    let scan_options = ScanOptions::parse("--raw-only  --max-recursion 2 --max-files 3").unwrap();
+
+    command
+        .run(
+            &input,
+            Path::new("/databases"),
+            &report,
+            Matching::EveryMatch,
+            &scan_options,
+        )
+        .unwrap();
+
+    assert_eq!(
+        fs::read_to_string(&report).unwrap(),
+        "--raw-only --max-recursion 2 --max-files 3"
+    );
+}
+
+#[test]
+fn a_scan_option_the_observer_does_not_take_is_refused() {
+    assert_eq!(
+        ScanOptions::parse("--max-files 3 --max-scantime 10"),
+        Err(ScanOptionsError::Unknown {
+            option: "--max-scantime".to_owned()
+        })
+    );
+}
+
+#[test]
+fn a_limit_without_a_number_is_refused() {
+    assert_eq!(
+        ScanOptions::parse("--max-files many"),
+        Err(ScanOptionsError::NeedsANumber {
+            option: "--max-files".to_owned()
+        })
+    );
+}
+
+#[test]
+fn a_raw_only_scan_cannot_be_asked_to_alert_on_limits() {
+    assert_eq!(
+        ScanOptions::parse("--alert-exceeds-max --raw-only"),
+        Err(ScanOptionsError::RawOnlyRaisesNoAlerts)
+    );
 }

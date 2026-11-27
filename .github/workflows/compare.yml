@@ -24,7 +24,8 @@ on:
       debar-command:
         description: >-
           Writes Debar's report of one input, run with sh -c from the directory holding the
-          checkouts debar/ and harness/, with HARNESS_INPUT, HARNESS_REPORT and HARNESS_DATABASES set.
+          checkouts debar/ and harness/, with HARNESS_INPUT, HARNESS_REPORT, HARNESS_DATABASES,
+          HARNESS_MATCHING and HARNESS_SCAN_OPTIONS set.
         required: true
         type: string
       inputs-directory:
@@ -67,6 +68,22 @@ on:
         required: false
         type: string
         default: every
+      fixture-sets:
+        description: >-
+          Without inputs-directory or built-target, the fixture sets to build and scan, separated
+          by spaces: basic (the harness's own fixtures), scan-core (binary data, compiled Python,
+          AI models, ignored kinds, objects at offsets and handler-type rescans) and containers
+          (archives, documents and executables).
+        required: false
+        type: string
+        default: basic
+      scan-options:
+        description: >-
+          The settings both scanners run with, as harness run --scan-options takes them: lowered
+          limits, --alert-exceeds-max or --raw-only.
+        required: false
+        type: string
+        default: ""
       known-differences:
         description: The known differences to judge by, a path in the harness repository.
         required: false
@@ -107,7 +124,16 @@ jobs:
           BUILD_COMMAND: ${{ inputs.build-command }}
       - name: Build the fixtures
         if: inputs.inputs-directory == '' && inputs.built-target == ''
-        run: harness/fixtures/build fixtures
+        run: |
+          for set in $FIXTURE_SETS; do
+            case "$set" in
+              basic) harness/fixtures/build fixtures ;;
+              scan-core | containers) "harness/fixtures/build-$set" fixtures ;;
+              *) echo "unknown fixture set $set" >&2; exit 2 ;;
+            esac
+          done
+        env:
+          FIXTURE_SETS: ${{ inputs.fixture-sets }}
       - name: Build inputs from the signatures
         if: inputs.built-target != ''
         run: harness/builder/build-inputs.sh built
@@ -127,10 +153,12 @@ jobs:
             --debar-command "$DEBAR_COMMAND" \
             --known-differences "harness/$KNOWN_DIFFERENCES" \
             --matching "$MATCHING" \
+            --scan-options "$SCAN_OPTIONS" \
             --work-directory "$GITHUB_WORKSPACE/harness-work"
         env:
           INPUTS_DIRECTORY: ${{ inputs.inputs-directory }}
           BUILT_TARGET: ${{ inputs.built-target }}
           KNOWN_DIFFERENCES: ${{ inputs.known-differences }}
           MATCHING: ${{ inputs.matching }}
+          SCAN_OPTIONS: ${{ inputs.scan-options }}
           DEBAR_COMMAND: ${{ inputs.debar-command }}

@@ -13,12 +13,14 @@ use crate::inputs::{Inputs, InputsError};
 use crate::matching::Matching;
 use crate::observer::{Observer, ObserverError};
 use crate::ratchet::{Judgement, KnownDifferences};
+use crate::scan_options::ScanOptions;
 
 pub struct RunSettings {
     pub input: PathBuf,
     pub debar_command: DebarCommand,
     pub observer: Observer,
     pub matching: Matching,
+    pub scan_options: ScanOptions,
     pub known_differences: KnownDifferences,
     pub work_directory: PathBuf,
     pub manifest: Option<PathBuf>,
@@ -89,14 +91,24 @@ pub fn run(settings: &RunSettings) -> Result<Outcome, RunError> {
         .map_err(RunError::Observer)?;
     let reference_reports = settings
         .observer
-        .observe(&inputs, &work.reference, settings.matching)
+        .observe(
+            &inputs,
+            &work.reference,
+            settings.matching,
+            &settings.scan_options,
+        )
         .map_err(RunError::Observer)?;
     let reference_every_match_reports = match settings.matching {
         Matching::EveryMatch => None,
         Matching::FirstMatch => Some(
             settings
                 .observer
-                .observe(&inputs, &work.reference_every_match, Matching::EveryMatch)
+                .observe(
+                    &inputs,
+                    &work.reference_every_match,
+                    Matching::EveryMatch,
+                    &settings.scan_options,
+                )
                 .map_err(RunError::Observer)?,
         ),
     };
@@ -118,6 +130,7 @@ pub fn run(settings: &RunSettings) -> Result<Outcome, RunError> {
                 &work.databases,
                 &debar_report,
                 settings.matching,
+                &settings.scan_options,
             )
             .map_err(RunError::DebarCommand)?;
         compared.push(compare_reports(

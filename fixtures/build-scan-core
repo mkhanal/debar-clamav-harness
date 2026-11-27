@@ -1,0 +1,62 @@
+#!/bin/sh
+set -eu
+
+destination="$1"
+mkdir -p "$destination"
+
+python3 -I - "$destination" <<'PYTHON'
+import random
+import sys
+
+destination = sys.argv[1]
+generator = random.Random("debar-clamav-harness-scan-core-1")
+KIB = 1024
+MIB = 1024 * KIB
+CHUNK = 128 * KIB
+GENERIC = bytes.fromhex("b41a8bd6cd21b40fba5c00cd21b415cd21c3")
+RESCANNED_AS_PDF = bytes.fromhex("2c234b5458202060b00160258a381b232159b8ffff622d")
+
+
+def binary(length):
+    return bytes(0 if index % 8 == 0 else generator.getrandbits(8) for index in range(length))
+
+
+def write(name, content):
+    with open(f"{destination}/{name}", "wb") as file:
+        file.write(content)
+
+
+def with_generic_at(length, offset):
+    filler = binary(length)
+    return filler[:offset] + GENERIC + filler[offset + len(GENERIC):]
+
+
+RAR_MARKER = b"Rar!\x1a\x07\x00"
+SEVEN_ZIP_MARKER = b"7z\xbc\xaf\x27\x1c"
+
+write("binary-clean-4k.bin", binary(4 * KIB))
+write("binary-generic-start.bin", GENERIC + binary(16 * KIB))
+write("binary-generic-across-chunk.bin", with_generic_at(2 * CHUNK, CHUNK - 30))
+write("binary-generic-after-chunk.bin", with_generic_at(2 * CHUNK, CHUNK + 1000))
+write("binary-generic-at-end.bin", binary(MIB - len(GENERIC)) + GENERIC)
+write("binary-3m-generic-at-2m.bin", with_generic_at(3 * MIB, 2 * MIB))
+write("binary-rescanned-as-pdf.bin", binary(2 * KIB) + RESCANNED_AS_PDF + binary(KIB) + GENERIC + binary(KIB))
+write("binary-rescanned-past-chunk.bin", binary(CHUNK + 8 * KIB) + RESCANNED_AS_PDF + binary(KIB))
+write("binary-six-bytes.bin", b"\x00\x01\x02\x03\x04\x05")
+write("compiled-python.pyc", b"\xa7\x0d\x0d\x0a" + bytes(12) + binary(2 * KIB) + GENERIC)
+write("ai-model.gguf", b"GGUF\x03\x00\x00\x00" + binary(2 * KIB) + GENERIC)
+
+write("ignored-sqlite.db", b"SQLite format 3\x00" + binary(4 * KIB) + GENERIC)
+write("ignored-mp3.mp3", b"ID3\x03\x00\x00\x00\x00\x00\x00" + binary(4 * KIB) + GENERIC)
+write("ignored-ogg.ogg", b"OggS\x00\x02" + binary(4 * KIB) + GENERIC)
+
+prefix = binary(200)
+write("embedded-rar-then-generic.bin", prefix + RAR_MARKER + binary(193) + GENERIC + binary(100))
+write("embedded-7z-then-generic.bin", prefix + SEVEN_ZIP_MARKER + binary(100) + GENERIC + binary(100))
+write("embedded-rar-then-7z.bin",
+      prefix + RAR_MARKER + binary(193) + SEVEN_ZIP_MARKER + binary(100) + GENERIC + binary(100))
+write("embedded-eleven-rar-markers.bin",
+      prefix + b"".join(RAR_MARKER + binary(40) for _ in range(11)) + GENERIC)
+write("embedded-rar-holding-1m.bin", prefix + RAR_MARKER + binary(MIB) + GENERIC)
+write("embedded-rar-across-chunk.bin", binary(CHUNK - 3) + RAR_MARKER + binary(4 * KIB) + GENERIC)
+PYTHON

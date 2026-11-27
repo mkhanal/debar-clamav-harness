@@ -10,13 +10,14 @@ use harness::matching::Matching;
 use harness::observer::Observer;
 use harness::ratchet::KnownDifferences;
 use harness::run::{RunSettings, compare_reports, judge, run};
+use harness::scan_options::ScanOptions;
 
 const USAGE: &str = "usage:
   harness compare --reference REPORT --debar REPORT [--known-differences FILE]
                   [--reference-every-match REPORT]
   harness run --input FILE_OR_DIRECTORY --debar-command COMMAND
               [--known-differences FILE] [--observer-image IMAGE] [--work-directory DIRECTORY]
-              [--manifest FILE] [--matching every|first]
+              [--manifest FILE] [--matching every|first] [--scan-options OPTIONS]
 
 harness run scans every file of the input with the reference observer and with COMMAND,
 which runs under sh -c with HARNESS_INPUT, HARNESS_REPORT, HARNESS_DATABASES and
@@ -28,7 +29,12 @@ it. The default, every, scans with all-match only, and compares each object's de
 a set. harness compare judges a report made without all-match that way when
 --reference-every-match names the reference's report of the same input with all-match. With --manifest, the builder's
 manifest of the inputs, it also counts how many inputs each scanner detected under the
-signature the input was built for.
+signature the input was built for. --scan-options gives both scanners the same settings, as
+one argument of space-separated words: --max-files N, --max-scan-size N, --max-file-size N
+and --max-recursion N set a limit (0 switches any but the last off), --alert-exceeds-max
+reports a limit reached as a detection, and --raw-only scans raw-only: every parser and heuristic off, each
+object typed and then matched once against the signatures for any type. The observer takes
+them as they are, and COMMAND finds them in HARNESS_SCAN_OPTIONS.
 
 Exit status: 0 when every difference is a known one, 1 when a new difference was found,
 2 when the comparison could not be made.";
@@ -52,6 +58,7 @@ enum Task {
         work_directory: Option<PathBuf>,
         manifest: Option<PathBuf>,
         matching: Matching,
+        scan_options: ScanOptions,
     },
 }
 
@@ -92,6 +99,7 @@ fn perform(task: Task) -> Result<bool, String> {
             work_directory,
             manifest,
             matching,
+            scan_options,
         } => {
             let settings = RunSettings {
                 input,
@@ -99,6 +107,7 @@ fn perform(task: Task) -> Result<bool, String> {
                 observer: observer_image
                     .map_or_else(Observer::pinned, |image| Observer::new(&image)),
                 matching,
+                scan_options,
                 known_differences: read_known_differences(known_differences.as_deref())?,
                 work_directory: work_directory
                     .unwrap_or_else(|| std::env::temp_dir().join(DEFAULT_WORK_DIRECTORY_NAME)),
@@ -157,6 +166,16 @@ fn parse_task(arguments: Vec<OsString>) -> Result<Task, String> {
                     word.to_str().and_then(Matching::from_word)
                 })
                 .ok_or_else(|| format!("--matching must be every or first\n{USAGE}"))?,
+            scan_options: options
+                .scan_settings
+                .map(OsString::into_string)
+                .transpose()
+                .map_err(|_| "--scan-options must be valid UTF-8".to_owned())?
+                .map_or_else(
+                    || Ok(ScanOptions::default()),
+                    |text| ScanOptions::parse(&text),
+                )
+                .map_err(|error| format!("{error}\n{USAGE}"))?,
         }),
         _ => Err(USAGE.to_owned()),
     }
@@ -174,6 +193,7 @@ struct Options {
     work_directory: Option<OsString>,
     manifest: Option<OsString>,
     matching: Option<OsString>,
+    scan_settings: Option<OsString>,
 }
 
 impl Options {
@@ -189,6 +209,7 @@ impl Options {
             Some("--work-directory") => &mut self.work_directory,
             Some("--manifest") => &mut self.manifest,
             Some("--matching") => &mut self.matching,
+            Some("--scan-options") => &mut self.scan_settings,
             _ => return Err(format!("unknown option {}\n{USAGE}", flag.display())),
         };
         *slot = Some(value);

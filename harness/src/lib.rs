@@ -7,3 +7,4 @@ pub mod matching;
 pub mod observer;
 pub mod ratchet;
 pub mod run;
+pub mod scan_options;

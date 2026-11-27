@@ -25,6 +25,12 @@
      CL_SCAN_PARSE_HTML | CL_SCAN_PARSE_PE | CL_SCAN_PARSE_ONENOTE | CL_SCAN_PARSE_IMAGE |     \
      CL_SCAN_PARSE_IMAGE_FUZZY_HASH)
 
+struct scan_settings {
+    bool every_match;
+    bool raw_only;
+    bool alert_exceeds_max;
+};
+
 struct name_list {
     const char **names;
     size_t count;
@@ -310,7 +316,7 @@ static char *sha256_of_descriptor(int descriptor)
     return hex;
 }
 
-static bool record_unreached_top_level(struct scan_observation *observation, int descriptor, const char *type)
+static bool record_unreached_top_level(struct scan_observation *observation, int descriptor)
 {
     struct stat status;
     if (fstat(descriptor, &status) != 0) {
@@ -324,9 +330,9 @@ static bool record_unreached_top_level(struct scan_observation *observation, int
     object->has_parent = false;
     object->depth      = 0;
     object->size       = (size_t)status.st_size;
-    object->type       = type != NULL ? strdup(type) : NULL;
+    object->type       = NULL;
     object->sha256     = sha256_of_descriptor(descriptor);
-    if (object->sha256 == NULL || (type != NULL && object->type == NULL)) {
+    if (object->sha256 == NULL) {
         return false;
     }
     object->reached = true;
@@ -446,12 +452,13 @@ static void release_observation(struct scan_observation *observation)
 }
 
 static bool observe_one_input(struct cl_engine *engine, const char *input_path, const char *report_path,
-                              const struct database_versions *databases, bool every_match)
+                              const struct database_versions *databases, const struct scan_settings *settings)
 {
-    struct cl_scan_options clamscan_defaults = {
-        .general   = (every_match ? CL_SCAN_GENERAL_ALLMATCHES : 0) | CL_SCAN_GENERAL_HEURISTICS,
-        .parse     = CLAMSCAN_DEFAULT_PARSERS,
-        .heuristic = 0,
+    struct cl_scan_options clamscan_options = {
+        .general   = (settings->every_match ? CL_SCAN_GENERAL_ALLMATCHES : 0) |
+                   (settings->raw_only ? 0 : CL_SCAN_GENERAL_HEURISTICS),
+        .parse     = settings->raw_only ? 0 : CLAMSCAN_DEFAULT_PARSERS,
+        .heuristic = settings->alert_exceeds_max ? CL_SCAN_HEURISTIC_EXCEEDS_MAX : 0,
         .mail      = 0,
         .dev       = 0,
     };
@@ -459,7 +466,6 @@ static bool observe_one_input(struct cl_engine *engine, const char *input_path, 
     cl_verdict_t verdict                = CL_VERDICT_NOTHING_FOUND;
     const char *last_alert              = NULL;
     uint64_t bytes_scanned              = 0;
-    char *top_level_type                = NULL;
     bool observed                       = false;
 
     int descriptor = open(input_path, O_RDONLY);
@@ -468,22 +474,27 @@ static bool observe_one_input(struct cl_engine *engine, const char *input_path, 
         return false;
     }
     cl_error_t scan_result = cl_scandesc_ex(descriptor, input_path, &verdict, &last_alert, &bytes_scanned, engine,
-                                            &clamscan_defaults, &observation, NULL, NULL, NULL, NULL,
-                                            &top_level_type);
+                                            &clamscan_options, &observation, NULL, NULL, NULL, NULL,
+                                            NULL);
+    bool alerted_without_scanning = scan_result == CL_VIRUS && verdict == CL_VERDICT_NOTHING_FOUND &&
+                                    observation.reached_order.count == 0 &&
+                                    observation.alerts_awaiting_layer.count > 0;
+    if (alerted_without_scanning) {
+        verdict = CL_VERDICT_POTENTIALLY_UNWANTED;
+    }
     bool scanned = scan_result == CL_SUCCESS || (scan_result == CL_VIRUS && verdict != CL_VERDICT_NOTHING_FOUND);
     if (!scanned) {
         fprintf(stderr, "clamav-observer: scanning %s failed: %s\n", input_path, cl_strerror(scan_result));
     } else if (observation.out_of_memory) {
         fprintf(stderr, "clamav-observer: ran out of memory recording %s\n", input_path);
     } else if (top_level_object(&observation) == NULL &&
-               !record_unreached_top_level(&observation, descriptor, top_level_type)) {
+               !record_unreached_top_level(&observation, descriptor)) {
         fprintf(stderr, "clamav-observer: cannot record the unscanned top-level object of %s\n", input_path);
     } else if (!attribute_alerts_reported_after_scan(&observation)) {
         fprintf(stderr, "clamav-observer: ran out of memory recording %s\n", input_path);
     } else {
         observed = write_report(report_path, &observation, verdict, databases);
     }
-    free(top_level_type);
     close(descriptor);
     release_observation(&observation);
     return observed;
@@ -559,8 +570,51 @@ static struct cl_engine *engine_with_official_databases(const char *database_dir
 
 static int usage(void)
 {
-    fputs("usage: clamav-observer [--databases DIRECTORY] [--first-match] INPUT REPORT [INPUT REPORT]...\n", stderr);
+    fputs("usage: clamav-observer [--databases DIRECTORY] [--first-match] [--raw-only | --alert-exceeds-max]\n"
+          "                       [--max-files N] [--max-scan-size N] [--max-file-size N] [--max-recursion N]\n"
+          "                       INPUT REPORT [INPUT REPORT]...\n",
+          stderr);
     return EXIT_OBSERVATION_FAILED;
+}
+
+struct limit_option {
+    const char *name;
+    enum cl_engine_field field;
+};
+
+static const struct limit_option LIMIT_OPTIONS[] = {
+    {"--max-files", CL_ENGINE_MAX_FILES},
+    {"--max-scan-size", CL_ENGINE_MAX_SCANSIZE},
+    {"--max-file-size", CL_ENGINE_MAX_FILESIZE},
+    {"--max-recursion", CL_ENGINE_MAX_RECURSION},
+};
+
+static const struct limit_option *limit_option_named(const char *name)
+{
+    for (size_t index = 0; index < sizeof(LIMIT_OPTIONS) / sizeof(LIMIT_OPTIONS[0]); index++) {
+        if (strcmp(LIMIT_OPTIONS[index].name, name) == 0) {
+            return &LIMIT_OPTIONS[index];
+        }
+    }
+    return NULL;
+}
+
+static bool parse_limit(const char *text, long long *limit)
+{
+    char *end = NULL;
+    errno     = 0;
+    *limit    = strtoll(text, &end, 10);
+    return errno == 0 && end != text && *end == '\0' && *limit >= 0;
+}
+
+static bool set_limit(struct cl_engine *engine, const struct limit_option *option, long long limit)
+{
+    cl_error_t result = cl_engine_set_num(engine, option->field, limit);
+    if (result != CL_SUCCESS) {
+        fprintf(stderr, "clamav-observer: cannot set %s to %lld: %s\n", option->name, limit, cl_strerror(result));
+        return false;
+    }
+    return true;
 }
 
 int main(int argument_count, char **arguments)
@@ -571,13 +625,31 @@ int main(int argument_count, char **arguments)
         database_directory = arguments[2];
         first_pair         = 3;
     }
-    bool every_match = true;
-    if (argument_count > first_pair && strcmp(arguments[first_pair], "--first-match") == 0) {
-        every_match = false;
+    struct scan_settings settings = {.every_match = true, .raw_only = false, .alert_exceeds_max = false};
+    const struct limit_option *limits_given[sizeof(LIMIT_OPTIONS) / sizeof(LIMIT_OPTIONS[0])];
+    long long limit_values[sizeof(LIMIT_OPTIONS) / sizeof(LIMIT_OPTIONS[0])];
+    size_t limit_count = 0;
+    while (first_pair < argument_count && strncmp(arguments[first_pair], "--", 2) == 0) {
+        const char *option                 = arguments[first_pair];
+        const struct limit_option *limited = limit_option_named(option);
+        if (strcmp(option, "--first-match") == 0) {
+            settings.every_match = false;
+        } else if (strcmp(option, "--raw-only") == 0) {
+            settings.raw_only = true;
+        } else if (strcmp(option, "--alert-exceeds-max") == 0) {
+            settings.alert_exceeds_max = true;
+        } else if (limited != NULL && first_pair + 1 < argument_count &&
+                   limit_count < sizeof(limits_given) / sizeof(limits_given[0]) &&
+                   parse_limit(arguments[first_pair + 1], &limit_values[limit_count])) {
+            limits_given[limit_count++] = limited;
+            first_pair++;
+        } else {
+            return usage();
+        }
         first_pair++;
     }
     int remaining = argument_count - first_pair;
-    if (remaining < 2 || remaining % 2 != 0) {
+    if (remaining < 2 || remaining % 2 != 0 || (settings.raw_only && settings.alert_exceeds_max)) {
         return usage();
     }
 
@@ -594,10 +666,16 @@ int main(int argument_count, char **arguments)
     if (engine == NULL) {
         return EXIT_OBSERVATION_FAILED;
     }
+    for (size_t index = 0; index < limit_count; index++) {
+        if (!set_limit(engine, limits_given[index], limit_values[index])) {
+            cl_engine_free(engine);
+            return EXIT_OBSERVATION_FAILED;
+        }
+    }
 
     bool every_input_observed = true;
     for (int index = first_pair; index + 1 < argument_count; index += 2) {
-        every_input_observed = observe_one_input(engine, arguments[index], arguments[index + 1], &databases, every_match) &&
+        every_input_observed = observe_one_input(engine, arguments[index], arguments[index + 1], &databases, &settings) &&
                                every_input_observed;
     }
     cl_engine_free(engine);

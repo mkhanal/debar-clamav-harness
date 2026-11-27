@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus};
 
 use crate::matching::{MATCHING_VARIABLE, Matching};
+use crate::scan_options::{SCAN_OPTIONS_VARIABLE, ScanOptions};
 
 pub const INPUT_VARIABLE: &str = "HARNESS_INPUT";
 pub const REPORT_VARIABLE: &str = "HARNESS_REPORT";
@@ -32,6 +33,7 @@ impl DebarCommand {
         databases: &Path,
         report: &Path,
         matching: Matching,
+        scan_options: &ScanOptions,
     ) -> Result<(), DebarCommandError> {
         let status = Command::new("sh")
             .arg("-c")
@@ -40,6 +42,7 @@ impl DebarCommand {
             .env(DATABASES_VARIABLE, databases)
             .env(REPORT_VARIABLE, report)
             .env(MATCHING_VARIABLE, matching.word())
+            .env(SCAN_OPTIONS_VARIABLE, scan_options.as_text())
             .status()
             .map_err(|error| DebarCommandError::NotStarted { error })?;
         if status.success() {

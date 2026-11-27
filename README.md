@@ -17,7 +17,10 @@ The comparison harness for [Debar](https://github.com/mkhanal/debar) and the Cla
 | `debar-known-differences.jsonl` | The ratchet for Debar, which Debar's CI judges its fixtures and its inputs built from extended and logical signatures of targets 0 and 4 by |
 | `debar-known-differences-first-match.jsonl` | Debar's ratchet when both scanners stop at their first strong detection, for its fixtures and its target-0 inputs |
 | `debar-known-differences-web-pages.jsonl`, `debar-known-differences-text.jsonl` | Debar's ratchets for inputs built from extended and logical signatures of targets 3 and 7, whose detections come only from normalised content Debar does not build yet |
+| `debar-known-differences-scan-core.jsonl` | Debar's ratchet for the scan-core and container fixtures, under default and lowered limits and raw-only: empty, since Debar's scan core must agree on every one |
 | `fixtures/build` | Builds the small fixture files CI compares: the EICAR test file, a zip holding it beside a clean file, a clean text file and a file too small to scan |
+| `fixtures/build-scan-core` | Builds the scan-core fixtures, kinds that need no format parser: binary data with an official generic signature at its start, across and after the first 128 KiB, at its end and past 2 MiB; compiled Python and an AI model; three ignored kinds; RAR and 7z markers inside binary data, eleven of them, one across the first 128 KiB and one holding 1 MiB; and binary data an official handler-type signature rescans as PDF |
+| `fixtures/build-containers` | Builds small containers, for raw-only runs: ZIP, gzip, tar and PDF holding the EICAR test file, a ZIP inside binary data, and PE, ELF and OLE2 headers before the generic signature |
 | `builder/build-inputs.sh` | Unpacks the pinned databases and builds a sample of inputs with the builder |
 | `builder/prove-against-reference.sh` | Proves built inputs against the reference scanner |
 | `.github/workflows/compare.yml` | The reusable workflow Debar's CI calls |
@@ -43,15 +46,16 @@ fixtures/build target/fixtures
 ```text
 harness run --input FILE_OR_DIRECTORY --debar-command COMMAND
             [--known-differences FILE] [--observer-image IMAGE] [--work-directory DIRECTORY]
-            [--manifest FILE] [--matching every|first]
+            [--manifest FILE] [--matching every|first] [--scan-options OPTIONS]
 ```
 
 1. Every regular file under the input is an input, in name order.
 2. The databases are copied out of the observer image, so both scanners load the same files.
 3. The observer scans every input in one container, with no network. With `--matching first` it scans without all-match, so each scan stops at its first strong detection, and then scans every input again with all-match, to know every name the reference reports for it; the default, `every`, scans with all-match only.
-4. `COMMAND` runs under `sh -c` once per input, with `HARNESS_INPUT` (the file to scan), `HARNESS_REPORT` (where to write its report), `HARNESS_DATABASES` (the directory of databases) and `HARNESS_MATCHING` (`every` or `first`, as given to the observer) set. It must write a report in the schema below and exit 0; any other exit stops the run.
+4. `COMMAND` runs under `sh -c` once per input, with `HARNESS_INPUT` (the file to scan), `HARNESS_REPORT` (where to write its report), `HARNESS_DATABASES` (the directory of databases), `HARNESS_MATCHING` (`every` or `first`, as given to the observer) and `HARNESS_SCAN_OPTIONS` (the scan options, below) set. It must write a report in the schema below and exit 0; any other exit stops the run.
 5. Each pair of reports is compared, as [below](#matching-objects-and-naming-differences), and the differences are judged against the known differences.
-6. With `--manifest`, the builder's `manifest.tsv` for the inputs, the run also counts how many inputs each scanner detected under the signature the input was built for.
+6. With `--scan-options`, one argument of words separated by spaces, both scanners run with the same settings: `--max-files N`, `--max-scan-size N`, `--max-file-size N` and `--max-recursion N` set a limit (0 switches the first three off), `--alert-exceeds-max` reports the first limit reached as a detection, and `--raw-only` scans raw-only. The observer takes the words as they are and the Debar command finds them in `HARNESS_SCAN_OPTIONS`; any other word, or `--raw-only` with `--alert-exceeds-max`, stops the run before it starts.
+7. With `--manifest`, the builder's `manifest.tsv` for the inputs, the run also counts how many inputs each scanner detected under the signature the input was built for.
 
 ### `harness compare`
 
@@ -90,13 +94,13 @@ The `harness-report` crate reads a report into a type that can only hold a valid
 
 ## What the observer records
 
-The observer loads every database in the pinned image's `/var/lib/clamav` (`main`, `daily` and `bytecode`) as `clamscan` does by default, and scans each input with `clamscan`'s default options plus `--allmatch`, or with `--first-match` (the observer's option that `harness run --matching first` passes) without it: every parser on, heuristic alerts on, the library's default limits, the clean cache on. It registers three of libclamav's scan callbacks:
+The observer loads every database in the pinned image's `/var/lib/clamav` (`main`, `daily` and `bytecode`) as `clamscan` does by default, and scans each input with `clamscan`'s default options plus `--allmatch`, or with `--first-match` (the observer's option that `harness run --matching first` passes) without it: every parser on, heuristic alerts on, the library's default limits, the clean cache on. The limit options set the engine's `CL_ENGINE_MAX_FILES`, `CL_ENGINE_MAX_SCANSIZE`, `CL_ENGINE_MAX_FILESIZE` and `CL_ENGINE_MAX_RECURSION`, and `--alert-exceeds-max` adds `CL_SCAN_HEURISTIC_EXCEEDS_MAX`. `--raw-only` scans with no parse, heuristic, mail or developer option and no general option but all-match, which is libclamav's raw-only mode: each object is typed and pattern-matched once as `CL_TYPE_ANY`, with no parser, no file-type recognition inside it and no second pass; handler-type rescans still happen. It registers three of libclamav's scan callbacks:
 
 - **`CL_SCAN_CALLBACK_FILE_TYPE`** records an object the first time it is typed: its id, its nearest recorded ancestor as parent, its depth, size and SHA-256. Each later call updates its type. This callback also fires for objects answered from the clean cache, which never reach the others.
 - **`CL_SCAN_CALLBACK_POST_SCAN`** records the type the object finally settled on.
 - **`CL_SCAN_CALLBACK_ALERT`** attributes each detection to the object it was raised on, taking the exact name from the virus-found callback that libclamav calls just before it, and accepts the alert.
 
-So an object, in the reference's reports, is something libclamav typed. Content it pattern-matches without typing, such as the normalised views of an HTML file, is not an object; a detection raised on such a view is attributed to the nearest object above it. A file of 5 bytes or less is never typed: the top-level record of such an input has `"type": null`, with its size and hash measured by the observer.
+So an object, in the reference's reports, is something libclamav typed. Content it pattern-matches without typing, such as the normalised views of an HTML file, is not an object; a detection raised on such a view is attributed to the nearest object above it. A top-level file libclamav never typed, because it is 5 bytes or less or a limit refused it, has a top-level record with `"type": null`, with its size and hash measured by the observer. A file over the file-size limit with `--alert-exceeds-max` is reported by libclamav with `Heuristics.Limits.Exceeded.MaxFileSize` and no verdict; the observer records that name on the top-level object with the verdict `potentially_unwanted`.
 
 **Observer limit.** With all-match on, libclamav reports potentially unwanted detections (names starting `PUA.`, `Heuristics.` or `BC.Heuristics.`) after the whole scan, without the object they were raised on. The observer attributes each one to the deepest object whose last alert it was when that object finished scanning, and otherwise to the top-level object. A wrongly attributed one appears as a detection on one object in the reference and on another in Debar.
 
@@ -190,7 +194,7 @@ jobs:
       debar-command: debar/target/release/debar <arguments that scan "$HARNESS_INPUT" with the databases in "$HARNESS_DATABASES" and write the report to "$HARNESS_REPORT">
 ```
 
-With `built-target: "0"` it scans, instead of the fixtures, an input built from every buildable extended signature of that target type plus `boundary-sample` (default 2,000) signatures across a 128 KiB boundary, and reports how many each scanner detected under the signature each input was built for. `extended-sample` (default every one) and `logical-sample` (default none) set how many extended and logical signatures of the target the inputs are built from; Debar's logical-signature jobs pass `extended-sample: "0"` and a `logical-sample` above the count. `matching: first` runs both scanners without all-match. `known-differences` names the ratchet file to judge by (default `known-differences.jsonl`); Debar passes `debar-known-differences.jsonl`, or for targets 3 and 7 the ratchet named for that target's content.
+With `built-target: "0"` it scans, instead of the fixtures, an input built from every buildable extended signature of that target type plus `boundary-sample` (default 2,000) signatures across a 128 KiB boundary, and reports how many each scanner detected under the signature each input was built for. `extended-sample` (default every one) and `logical-sample` (default none) set how many extended and logical signatures of the target the inputs are built from; Debar's logical-signature jobs pass `extended-sample: "0"` and a `logical-sample` above the count. `matching: first` runs both scanners without all-match. `fixture-sets` names the fixture sets to scan in place of the basic one (`basic`, `scan-core`, `containers`, separated by spaces), and `scan-options` the settings both scanners run with, as `--scan-options` takes them. `known-differences` names the ratchet file to judge by (default `known-differences.jsonl`); Debar passes `debar-known-differences.jsonl`, or for targets 3 and 7 the ratchet named for that target's content.
 
 It runs on amd64 and arm64. It checks out this repository at `harness-ref` into `harness/` and Debar (by default the calling repository at the triggering commit; `debar-repository` and `debar-ref` override them) into `debar/`, runs `build-command` inside `debar/`, builds the fixtures unless `inputs-directory` names others, and runs `harness/run-harness run` from the directory holding both checkouts with this repository's known differences. This repository's own CI calls the same workflow with the stand-in as Debar.
 

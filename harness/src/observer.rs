@@ -6,6 +6,7 @@ use std::process::{Command, Output, Stdio};
 
 use crate::inputs::Inputs;
 use crate::matching::Matching;
+use crate::scan_options::ScanOptions;
 
 pub const PINNED_IMAGE: &str = include_str!("../../observer-image");
 const DATABASE_DIRECTORY_IN_IMAGE: &str = "/var/lib/clamav/.";
@@ -68,6 +69,7 @@ impl Observer {
         inputs: &Inputs,
         reports: &Path,
         matching: Matching,
+        scan_options: &ScanOptions,
     ) -> Result<Vec<PathBuf>, ObserverError> {
         let owner = owner_of(reports)?;
         let input_volume = format!("{}:{INPUT_MOUNT}:ro", inputs.root().display());
@@ -101,6 +103,7 @@ impl Observer {
             if matching == Matching::FirstMatch {
                 arguments.push(FIRST_MATCH_OPTION.to_owned());
             }
+            arguments.extend(scan_options.words().iter().cloned());
             for (input, report) in batch {
                 arguments.push(input.clone());
                 arguments.push(format!("{REPORT_MOUNT}/{report}"));
